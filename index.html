@@ -141,6 +141,12 @@
 
   var STORAGE_KEY = "gpsArPoints_v1";
 
+  // ---- 可調參數 ----
+  var AR_RENDER_THROTTLE_MS = 150;             // 修正1: updateAR() 畫面重繪節流間隔(ms)
+  var HEADING_SMOOTHING_WINDOW = 5;            // 修正2: 羅盤圓周平滑取樣數
+  var LABEL_COLLISION_THRESHOLD_PERCENT = 12;  // 修正3: 視為標籤重疊的水平距離門檻(佔畫面寬度 %)
+  var LABEL_COLLISION_OFFSET_PX = 60;          // 修正3: 標籤重疊時垂直錯開距離(px)
+
   function uid() {
     return Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 8);
   }
@@ -177,6 +183,17 @@
   function normalizeRelative(bearing, heading) {
     var diff = ((bearing - heading + 540) % 360) - 180;
     return diff;
+  }
+
+  // 修正2: 圓周平均 —— 0°/360° 邊界不能用一般算術平均，要先轉成 sin/cos 向量再平均
+  function circularMeanDegrees(anglesDeg) {
+    var sumSin = 0, sumCos = 0;
+    anglesDeg.forEach(function (a) {
+      sumSin += Math.sin(toRad(a));
+      sumCos += Math.cos(toRad(a));
+    });
+    var meanDeg = toDeg(Math.atan2(sumSin / anglesDeg.length, sumCos / anglesDeg.length));
+    return (meanDeg + 360) % 360;
   }
 
   // ===================== Tabs =====================
@@ -282,21 +299,40 @@
   var viewState = {
     stream: null,
     watchId: null,
-    renderTimer: null,
+    rafId: null,           // 修正1: requestAnimationFrame 節流迴圈 id
+    lastRenderTime: 0,     // 修正1: 上次實際重繪 updateAR() 的時間戳記
     currentPosition: null, // {lat, lng, accuracy}
-    currentHeading: null,  // degrees, 0-360, 0 = true north
+    currentHeading: null,  // degrees, 0-360, 0 = true north (已平滑後的值)
     headingSource: "尚無方位資料",
     headingIsFallback: false,
+    headingBuffer: [],     // 修正2: 最近 N 筆原始羅盤讀數，用於圓周平滑
+    headingSourceKey: null,// 修正2: 目前平滑取樣所屬的方位來源，來源切換時要重置緩衝區
+    compassAccuracy: null, // 修正2: iOS webkitCompassAccuracy
     gotAbsolute: false,
     gotIosCompass: false,
     markerEls: {},
     orientationHandlersAttached: false
   };
 
+  // 修正2: 收到新的原始羅盤讀數時，先做圓周平滑再寫入 currentHeading。
+  // 來源切換(例如從 fallback 換成絕對方位)時清空緩衝區，避免不同來源的角度混在一起平均。
+  function pushHeadingSample(rawHeadingDeg, sourceKey) {
+    if (viewState.headingSourceKey !== sourceKey) {
+      viewState.headingSourceKey = sourceKey;
+      viewState.headingBuffer = [];
+    }
+    viewState.headingBuffer.push(rawHeadingDeg);
+    if (viewState.headingBuffer.length > HEADING_SMOOTHING_WINDOW) {
+      viewState.headingBuffer.shift();
+    }
+    viewState.currentHeading = circularMeanDegrees(viewState.headingBuffer);
+  }
+
   function absoluteOrientationHandler(e) {
     if (e.alpha === null || e.alpha === undefined) return;
     viewState.gotAbsolute = true;
-    viewState.currentHeading = (360 - e.alpha) % 360;
+    var raw = (360 - e.alpha) % 360;
+    pushHeadingSample(raw, "android-absolute");
     viewState.headingSource = "Android 絕對方位 (deviceorientationabsolute)";
     viewState.headingIsFallback = false;
   }
@@ -304,14 +340,16 @@
   function orientationHandler(e) {
     if (typeof e.webkitCompassHeading === "number" && !isNaN(e.webkitCompassHeading)) {
       viewState.gotIosCompass = true;
-      viewState.currentHeading = e.webkitCompassHeading;
+      viewState.compassAccuracy = (typeof e.webkitCompassAccuracy === "number" && e.webkitCompassAccuracy >= 0)
+        ? e.webkitCompassAccuracy : null;
+      pushHeadingSample(e.webkitCompassHeading, "ios");
       viewState.headingSource = "iOS 羅盤 (webkitCompassHeading)";
       viewState.headingIsFallback = false;
       return;
     }
     if (viewState.gotAbsolute) return; // absolute event already provides heading
     if (e.alpha === null || e.alpha === undefined) return;
-    viewState.currentHeading = e.alpha;
+    pushHeadingSample(e.alpha, "fallback");
     viewState.headingSource = "⚠️ 非絕對方位 (deviceorientation alpha)";
     viewState.headingIsFallback = true;
   }
@@ -400,7 +438,7 @@
     });
   }
 
-  function renderFrame() {
+  function updateAR() {
     var points = loadPoints();
     var fov = parseFloat(fovInput.value);
     if (!fov || isNaN(fov)) fov = 65;
@@ -419,17 +457,23 @@
     }
     diagLines.push("方位角: " + (viewState.currentHeading != null ? viewState.currentHeading.toFixed(1) + "°" : "N/A") +
       "  來源: " + viewState.headingSource);
+    diagLines.push("羅盤精度: " + (viewState.compassAccuracy != null ? "±" + viewState.compassAccuracy.toFixed(1) + "°" : "無法取得"));
     diagLines.push("FOV: " + fov + "° (±" + halfFov + "°)");
     diagLines.push("--- 標記點 (" + points.length + ") ---");
 
     var validIds = [];
+    var entries = [];
+
+    // 第一階段：只計算每個點的方位角/距離/相對夾角，先不動 DOM，
+    // 因為修正3的重疊避讓要等全部算完、依水平位置排序後才能決定要不要垂直錯開。
     points.forEach(function (p) {
       validIds.push(p.id);
       var el = ensureMarkerEl(p);
+      var regAccuracyText = "登記時精度 ±" + (p.accuracy != null ? p.accuracy.toFixed(1) : "?") + "m";
 
       if (!viewState.currentPosition || viewState.currentHeading == null) {
         el.style.display = "none";
-        diagLines.push(p.label + ": 等待 GPS/方位資料...");
+        diagLines.push(p.label + ": 等待 GPS/方位資料... (" + regAccuracyText + ")");
         return;
       }
 
@@ -441,24 +485,59 @@
       );
       var rel = normalizeRelative(brg, viewState.currentHeading);
       var inView = Math.abs(rel) <= halfFov;
+      var xPercent = 50 + (rel / halfFov) * 50;
 
-      if (inView) {
-        var xPercent = 50 + (rel / halfFov) * 50;
-        el.style.left = xPercent + "%";
+      entries.push({
+        p: p, el: el, dist: dist, brg: brg, rel: rel, inView: inView,
+        xPercent: xPercent, regAccuracyText: regAccuracyText, verticalOffset: 0
+      });
+    });
+
+    // 修正3：標籤重疊碰撞避讓 —— 依水平位置排序，相鄰太近的標籤交錯垂直錯開
+    var visible = entries.filter(function (e) { return e.inView; });
+    visible.sort(function (a, b) { return a.xPercent - b.xPercent; });
+    var prevX = null;
+    var prevOffset = 0;
+    visible.forEach(function (entry) {
+      if (prevX !== null && Math.abs(entry.xPercent - prevX) < LABEL_COLLISION_THRESHOLD_PERCENT) {
+        entry.verticalOffset = (prevOffset === 0) ? LABEL_COLLISION_OFFSET_PX : 0;
+      } else {
+        entry.verticalOffset = 0;
+      }
+      prevX = entry.xPercent;
+      prevOffset = entry.verticalOffset;
+    });
+
+    // 第二階段：套用到固定的 DOM 節點（每個登記點只有一個節點，重複使用，只改 style/文字）
+    entries.forEach(function (entry) {
+      var el = entry.el;
+      if (entry.inView) {
+        el.style.left = entry.xPercent + "%";
+        el.style.top = "calc(42% + " + entry.verticalOffset + "px)";
         el.style.display = "block";
-        el.innerHTML = escapeHtml(p.label) + "<span class='marker-dist'>" + dist.toFixed(1) + " m</span>";
+        el.innerHTML = escapeHtml(entry.p.label) + "<span class='marker-dist'>" + entry.dist.toFixed(1) + " m</span>";
       } else {
         el.style.display = "none";
       }
-
       diagLines.push(
-        p.label + ": bearing=" + brg.toFixed(1) + "° dist=" + dist.toFixed(1) + "m rel=" + rel.toFixed(1) +
-        "° inView=" + (inView ? "YES" : "no")
+        entry.p.label + ": bearing=" + entry.brg.toFixed(1) + "° dist=" + entry.dist.toFixed(1) + "m rel=" + entry.rel.toFixed(1) +
+        "° inView=" + (entry.inView ? "YES" : "no") + " (" + entry.regAccuracyText + ")"
       );
     });
     cleanupMarkerEls(validIds);
 
     diagnostics.innerHTML = diagLines.map(escapeHtml).join("\n");
+  }
+
+  // 修正1：畫面重繪節流 —— 用 rAF 迴圈持續跑，但每 AR_RENDER_THROTTLE_MS 才真正執行一次 updateAR()。
+  // 羅盤事件觸發頻率很高，但只更新 viewState.currentHeading 這個變數本身(見 orientationHandler)，
+  // 實際重繪畫面(含診斷區塊、標籤位置)則由這個節流後的迴圈驅動，避免每次事件都整個重繪。
+  function arRenderLoop(now) {
+    if (now - viewState.lastRenderTime >= AR_RENDER_THROTTLE_MS) {
+      viewState.lastRenderTime = now;
+      updateAR();
+    }
+    viewState.rafId = requestAnimationFrame(arRenderLoop);
   }
 
   function startViewMode() {
@@ -467,8 +546,9 @@
     startGeoWatch();
     startCamera().then(function () {
       startOverlay.style.display = "none";
-      if (viewState.renderTimer) clearInterval(viewState.renderTimer);
-      viewState.renderTimer = setInterval(renderFrame, 200);
+      viewState.lastRenderTime = 0;
+      if (viewState.rafId) cancelAnimationFrame(viewState.rafId);
+      viewState.rafId = requestAnimationFrame(arRenderLoop);
     }).catch(function (err) {
       diagnostics.textContent = "相機啟動失敗: " + err.message;
     });
@@ -484,15 +564,19 @@
       navigator.geolocation.clearWatch(viewState.watchId);
       viewState.watchId = null;
     }
-    if (viewState.renderTimer) {
-      clearInterval(viewState.renderTimer);
-      viewState.renderTimer = null;
+    if (viewState.rafId) {
+      cancelAnimationFrame(viewState.rafId);
+      viewState.rafId = null;
     }
+    viewState.lastRenderTime = 0;
     detachOrientationListeners();
     viewState.currentPosition = null;
     viewState.currentHeading = null;
     viewState.headingSource = "尚無方位資料";
     viewState.headingIsFallback = false;
+    viewState.headingBuffer = [];
+    viewState.headingSourceKey = null;
+    viewState.compassAccuracy = null;
     viewState.gotAbsolute = false;
     viewState.gotIosCompass = false;
     Object.keys(viewState.markerEls).forEach(function (id) {
