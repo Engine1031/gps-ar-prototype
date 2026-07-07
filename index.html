@@ -1,0 +1,513 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<title>GPS AR 定點實驗</title>
+<style>
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body {
+    margin: 0; padding: 0; height: 100%;
+    background: #000; color: #fff;
+    font-family: -apple-system, "PingFang TC", "Noto Sans TC", sans-serif;
+    overscroll-behavior: none;
+  }
+  #app { height: 100vh; display: flex; flex-direction: column; }
+
+  /* Tabs */
+  #tabs { display: flex; background: #111; border-bottom: 2px solid #444; flex: 0 0 auto; }
+  .tab-btn {
+    flex: 1; padding: 16px 8px; font-size: 18px; font-weight: bold;
+    background: #111; color: #888; border: none; border-bottom: 4px solid transparent;
+  }
+  .tab-btn.active { color: #fff; border-bottom-color: #0f8; background: #1a1a1a; }
+
+  .screen { flex: 1; overflow: hidden; position: relative; display: none; }
+  .screen.active { display: block; }
+
+  /* ---------- Register mode ---------- */
+  #registerScreen { overflow-y: auto; padding: 16px; }
+  .big-btn {
+    display: block; width: 100%; padding: 22px; font-size: 22px; font-weight: bold;
+    background: #0f8; color: #000; border: none; border-radius: 12px; margin-bottom: 12px;
+  }
+  .big-btn:active { background: #0c6; }
+  .secondary-btn {
+    display: block; width: 100%; padding: 16px; font-size: 18px; font-weight: bold;
+    background: #333; color: #fff; border: 2px solid #666; border-radius: 12px; margin-bottom: 12px;
+  }
+  #registerStatus { min-height: 24px; font-size: 15px; color: #ff0; margin-bottom: 12px; white-space: pre-wrap; }
+  #pointList { list-style: none; margin: 0; padding: 0; }
+  #pointList li {
+    background: #181818; border: 1px solid #444; border-radius: 10px;
+    padding: 12px; margin-bottom: 10px; display: flex; justify-content: space-between; align-items: center; gap: 10px;
+  }
+  .point-info { font-size: 15px; line-height: 1.5; }
+  .point-info b { font-size: 17px; color: #0f8; }
+  .point-meta { color: #999; font-size: 12px; font-family: monospace; }
+  .delete-btn { background: #a00; color: #fff; border: none; border-radius: 8px; padding: 10px 14px; font-size: 15px; flex: 0 0 auto; }
+  #emptyHint { color: #777; font-size: 14px; padding: 20px 0; text-align: center; }
+
+  /* ---------- View / AR mode ---------- */
+  #viewScreen { background: #000; }
+  #camera {
+    position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; background: #000;
+  }
+  #overlayLayer { position: absolute; inset: 0; pointer-events: none; }
+  .marker {
+    position: absolute; top: 42%; transform: translate(-50%, -50%);
+    background: rgba(0, 40, 20, 0.75); border: 2px solid #0f8; border-radius: 10px;
+    padding: 6px 10px; color: #fff; font-size: 14px; font-weight: bold;
+    white-space: nowrap; text-align: center; display: none;
+  }
+  .marker .marker-dist { display: block; font-size: 12px; font-weight: normal; color: #9f9; }
+
+  #viewTopBar {
+    position: absolute; top: 0; left: 0; right: 0; z-index: 5;
+    display: flex; gap: 8px; padding: 8px; background: linear-gradient(rgba(0,0,0,0.6), transparent);
+  }
+  #viewTopBar button {
+    flex: 0 0 auto; padding: 10px 12px; font-size: 14px; font-weight: bold;
+    background: #222; color: #fff; border: 1px solid #666; border-radius: 8px;
+  }
+  #fovWrap { display: flex; align-items: center; gap: 6px; background: #222; border: 1px solid #666; border-radius: 8px; padding: 6px 10px; }
+  #fovWrap label { font-size: 13px; }
+  #fovInput { width: 50px; font-size: 15px; background: #111; color: #fff; border: 1px solid #666; border-radius: 4px; text-align: center; }
+
+  #startOverlay {
+    position: absolute; inset: 0; z-index: 20; background: #000;
+    display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 20px;
+  }
+  #startOverlay p { color: #ccc; font-size: 14px; max-width: 320px; text-align: center; margin-bottom: 20px; }
+
+  #orientationWarning {
+    position: absolute; top: 54px; left: 8px; right: 8px; z-index: 5;
+    background: rgba(180, 40, 0, 0.85); color: #fff; font-weight: bold; font-size: 13px;
+    padding: 8px 10px; border-radius: 8px; display: none;
+  }
+
+  #diagnostics {
+    position: absolute; bottom: 0; left: 0; right: 0; z-index: 5; max-height: 42vh; overflow-y: auto;
+    background: rgba(0, 0, 0, 0.8); color: #0f0; font-family: "SF Mono", Menlo, monospace;
+    font-size: 12px; line-height: 1.5; padding: 8px 10px; white-space: pre-wrap;
+  }
+  #diagnostics .warn { color: #f80; }
+</style>
+</head>
+<body>
+<div id="app">
+
+  <div id="tabs">
+    <button class="tab-btn active" data-tab="register">登記模式</button>
+    <button class="tab-btn" data-tab="view">檢視模式</button>
+  </div>
+
+  <!-- ===================== 登記模式 ===================== -->
+  <div id="registerScreen" class="screen active">
+    <button id="btnRegister" class="big-btn">📍 取得目前位置並登記地標</button>
+    <div id="registerStatus"></div>
+    <ul id="pointList"></ul>
+    <div id="emptyHint">尚未登記任何地標</div>
+  </div>
+
+  <!-- ===================== 檢視模式 ===================== -->
+  <div id="viewScreen" class="screen">
+    <div id="startOverlay">
+      <p>檢視模式需要開啟相機、GPS 與方向感應器（羅盤）。<br>請按下開始，並允許瀏覽器的權限請求。</p>
+      <button id="btnStartView" class="big-btn" style="width:260px;">▶️ 開始檢視模式</button>
+      <button id="btnBackFromStart" class="secondary-btn" style="width:260px;">回登記模式</button>
+    </div>
+
+    <video id="camera" autoplay playsinline muted></video>
+    <div id="overlayLayer"></div>
+    <div id="orientationWarning">⚠️ 非絕對方位資料，方向可能不準確</div>
+
+    <div id="viewTopBar">
+      <button id="btnBack">← 回登記模式</button>
+      <div id="fovWrap">
+        <label for="fovInput">FOV°</label>
+        <input id="fovInput" type="number" value="65" min="20" max="120" step="1">
+      </div>
+    </div>
+
+    <div id="diagnostics">初始化中...</div>
+  </div>
+
+</div>
+
+<script>
+(function () {
+  "use strict";
+
+  var STORAGE_KEY = "gpsArPoints_v1";
+
+  function uid() {
+    return Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 8);
+  }
+  function loadPoints() {
+    try { return JSON.parse(localStorage.getItem(STORAGE_KEY)) || []; }
+    catch (e) { return []; }
+  }
+  function savePoints(points) {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(points));
+  }
+  function toRad(d) { return d * Math.PI / 180; }
+  function toDeg(r) { return r * 180 / Math.PI; }
+
+  function haversineDistance(lat1, lng1, lat2, lng2) {
+    var R = 6371000;
+    var dLat = toRad(lat2 - lat1);
+    var dLng = toRad(lng2 - lng1);
+    var a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+      Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) *
+      Math.sin(dLng / 2) * Math.sin(dLng / 2);
+    var c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    return R * c;
+  }
+
+  function bearingTo(lat1, lng1, lat2, lng2) {
+    var y = Math.sin(toRad(lng2 - lng1)) * Math.cos(toRad(lat2));
+    var x = Math.cos(toRad(lat1)) * Math.sin(toRad(lat2)) -
+      Math.sin(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.cos(toRad(lng2 - lng1));
+    var brng = toDeg(Math.atan2(y, x));
+    return (brng + 360) % 360;
+  }
+
+  // normalize to -180..180
+  function normalizeRelative(bearing, heading) {
+    var diff = ((bearing - heading + 540) % 360) - 180;
+    return diff;
+  }
+
+  // ===================== Tabs =====================
+  var tabBtns = document.querySelectorAll(".tab-btn");
+  var screens = { register: document.getElementById("registerScreen"), view: document.getElementById("viewScreen") };
+
+  function switchTab(name) {
+    tabBtns.forEach(function (b) { b.classList.toggle("active", b.dataset.tab === name); });
+    Object.keys(screens).forEach(function (k) { screens[k].classList.toggle("active", k === name); });
+    if (name !== "view") stopViewMode();
+  }
+  tabBtns.forEach(function (b) {
+    b.addEventListener("click", function () { switchTab(b.dataset.tab); });
+  });
+
+  // ===================== Register mode =====================
+  var btnRegister = document.getElementById("btnRegister");
+  var registerStatus = document.getElementById("registerStatus");
+  var pointList = document.getElementById("pointList");
+  var emptyHint = document.getElementById("emptyHint");
+
+  function renderPointList() {
+    var points = loadPoints();
+    pointList.innerHTML = "";
+    emptyHint.style.display = points.length === 0 ? "block" : "none";
+    points.slice().reverse().forEach(function (p) {
+      var li = document.createElement("li");
+      var info = document.createElement("div");
+      info.className = "point-info";
+      info.innerHTML = "<b>" + escapeHtml(p.label) + "</b><br>" +
+        p.lat.toFixed(6) + ", " + p.lng.toFixed(6) +
+        " (±" + (p.accuracy != null ? p.accuracy.toFixed(1) : "?") + "m)<br>" +
+        "<span class='point-meta'>" + new Date(p.createdAt).toLocaleString() + "</span>";
+      var delBtn = document.createElement("button");
+      delBtn.className = "delete-btn";
+      delBtn.textContent = "刪除";
+      delBtn.addEventListener("click", function () {
+        var all = loadPoints().filter(function (x) { return x.id !== p.id; });
+        savePoints(all);
+        renderPointList();
+      });
+      li.appendChild(info);
+      li.appendChild(delBtn);
+      pointList.appendChild(li);
+    });
+  }
+
+  function escapeHtml(s) {
+    var d = document.createElement("div");
+    d.textContent = s;
+    return d.innerHTML;
+  }
+
+  btnRegister.addEventListener("click", function () {
+    if (!("geolocation" in navigator)) {
+      registerStatus.textContent = "此裝置/瀏覽器不支援 GPS 定位";
+      return;
+    }
+    registerStatus.textContent = "正在取得高精度定位，請稍候...";
+    navigator.geolocation.getCurrentPosition(
+      function (pos) {
+        var lat = pos.coords.latitude;
+        var lng = pos.coords.longitude;
+        var accuracy = pos.coords.accuracy;
+        registerStatus.textContent = "座標: " + lat.toFixed(6) + ", " + lng.toFixed(6) + " (±" + accuracy.toFixed(1) + "m)";
+        var label = window.prompt(
+          "座標: " + lat.toFixed(6) + ", " + lng.toFixed(6) + "\n精度: ±" + accuracy.toFixed(1) + "m\n\n請輸入這個地標的名稱:"
+        );
+        if (label === null || label.trim() === "") {
+          registerStatus.textContent += "\n(已取消，未儲存)";
+          return;
+        }
+        var point = {
+          id: uid(), lat: lat, lng: lng, label: label.trim(),
+          accuracy: accuracy, createdAt: new Date().toISOString()
+        };
+        var points = loadPoints();
+        points.push(point);
+        savePoints(points);
+        registerStatus.textContent = "已登記：" + label.trim();
+        renderPointList();
+      },
+      function (err) {
+        registerStatus.textContent = "定位失敗: " + err.message + " (code " + err.code + ")";
+      },
+      { enableHighAccuracy: true, timeout: 20000, maximumAge: 0 }
+    );
+  });
+
+  renderPointList();
+
+  // ===================== View / AR mode =====================
+  var btnStartView = document.getElementById("btnStartView");
+  var btnBack = document.getElementById("btnBack");
+  var btnBackFromStart = document.getElementById("btnBackFromStart");
+  var startOverlay = document.getElementById("startOverlay");
+  var video = document.getElementById("camera");
+  var overlayLayer = document.getElementById("overlayLayer");
+  var diagnostics = document.getElementById("diagnostics");
+  var orientationWarning = document.getElementById("orientationWarning");
+  var fovInput = document.getElementById("fovInput");
+
+  var viewState = {
+    stream: null,
+    watchId: null,
+    renderTimer: null,
+    currentPosition: null, // {lat, lng, accuracy}
+    currentHeading: null,  // degrees, 0-360, 0 = true north
+    headingSource: "尚無方位資料",
+    headingIsFallback: false,
+    gotAbsolute: false,
+    gotIosCompass: false,
+    markerEls: {},
+    orientationHandlersAttached: false
+  };
+
+  function absoluteOrientationHandler(e) {
+    if (e.alpha === null || e.alpha === undefined) return;
+    viewState.gotAbsolute = true;
+    viewState.currentHeading = (360 - e.alpha) % 360;
+    viewState.headingSource = "Android 絕對方位 (deviceorientationabsolute)";
+    viewState.headingIsFallback = false;
+  }
+
+  function orientationHandler(e) {
+    if (typeof e.webkitCompassHeading === "number" && !isNaN(e.webkitCompassHeading)) {
+      viewState.gotIosCompass = true;
+      viewState.currentHeading = e.webkitCompassHeading;
+      viewState.headingSource = "iOS 羅盤 (webkitCompassHeading)";
+      viewState.headingIsFallback = false;
+      return;
+    }
+    if (viewState.gotAbsolute) return; // absolute event already provides heading
+    if (e.alpha === null || e.alpha === undefined) return;
+    viewState.currentHeading = e.alpha;
+    viewState.headingSource = "⚠️ 非絕對方位 (deviceorientation alpha)";
+    viewState.headingIsFallback = true;
+  }
+
+  function attachOrientationListeners() {
+    if (viewState.orientationHandlersAttached) return;
+    window.addEventListener("deviceorientationabsolute", absoluteOrientationHandler);
+    window.addEventListener("deviceorientation", orientationHandler);
+    viewState.orientationHandlersAttached = true;
+  }
+
+  function detachOrientationListeners() {
+    if (!viewState.orientationHandlersAttached) return;
+    window.removeEventListener("deviceorientationabsolute", absoluteOrientationHandler);
+    window.removeEventListener("deviceorientation", orientationHandler);
+    viewState.orientationHandlersAttached = false;
+  }
+
+  function startOrientation() {
+    var hasIosPermissionApi = typeof DeviceOrientationEvent !== "undefined" &&
+      typeof DeviceOrientationEvent.requestPermission === "function";
+    if (hasIosPermissionApi) {
+      // 必須在使用者按鈕點擊事件中直接呼叫，不能自動觸發
+      DeviceOrientationEvent.requestPermission().then(function (state) {
+        if (state === "granted") {
+          attachOrientationListeners();
+        } else {
+          viewState.headingSource = "羅盤權限被拒絕";
+        }
+      }).catch(function (err) {
+        viewState.headingSource = "羅盤權限請求錯誤: " + err.message;
+      });
+    } else {
+      attachOrientationListeners();
+    }
+  }
+
+  function startCamera() {
+    return navigator.mediaDevices.getUserMedia({
+      video: { facingMode: { ideal: "environment" } },
+      audio: false
+    }).then(function (stream) {
+      viewState.stream = stream;
+      video.srcObject = stream;
+      return video.play();
+    });
+  }
+
+  function startGeoWatch() {
+    if (!("geolocation" in navigator)) {
+      diagnostics.textContent = "此裝置/瀏覽器不支援 GPS 定位";
+      return;
+    }
+    viewState.watchId = navigator.geolocation.watchPosition(
+      function (pos) {
+        viewState.currentPosition = {
+          lat: pos.coords.latitude,
+          lng: pos.coords.longitude,
+          accuracy: pos.coords.accuracy
+        };
+      },
+      function (err) {
+        diagnostics.textContent = "GPS 錯誤: " + err.message + " (code " + err.code + ")";
+      },
+      { enableHighAccuracy: true, maximumAge: 1000, timeout: 15000 }
+    );
+  }
+
+  function ensureMarkerEl(point) {
+    var el = viewState.markerEls[point.id];
+    if (!el) {
+      el = document.createElement("div");
+      el.className = "marker";
+      overlayLayer.appendChild(el);
+      viewState.markerEls[point.id] = el;
+    }
+    return el;
+  }
+
+  function cleanupMarkerEls(validIds) {
+    Object.keys(viewState.markerEls).forEach(function (id) {
+      if (validIds.indexOf(id) === -1) {
+        overlayLayer.removeChild(viewState.markerEls[id]);
+        delete viewState.markerEls[id];
+      }
+    });
+  }
+
+  function renderFrame() {
+    var points = loadPoints();
+    var fov = parseFloat(fovInput.value);
+    if (!fov || isNaN(fov)) fov = 65;
+    fov = Math.max(20, Math.min(120, fov));
+    var halfFov = fov / 2;
+
+    orientationWarning.style.display = viewState.headingIsFallback ? "block" : "none";
+
+    var diagLines = [];
+    diagLines.push("=== 診斷資訊 ===");
+    if (viewState.currentPosition) {
+      diagLines.push("GPS: " + viewState.currentPosition.lat.toFixed(6) + ", " + viewState.currentPosition.lng.toFixed(6) +
+        "  accuracy: ±" + viewState.currentPosition.accuracy.toFixed(1) + "m");
+    } else {
+      diagLines.push("GPS: 尚未取得定位");
+    }
+    diagLines.push("方位角: " + (viewState.currentHeading != null ? viewState.currentHeading.toFixed(1) + "°" : "N/A") +
+      "  來源: " + viewState.headingSource);
+    diagLines.push("FOV: " + fov + "° (±" + halfFov + "°)");
+    diagLines.push("--- 標記點 (" + points.length + ") ---");
+
+    var validIds = [];
+    points.forEach(function (p) {
+      validIds.push(p.id);
+      var el = ensureMarkerEl(p);
+
+      if (!viewState.currentPosition || viewState.currentHeading == null) {
+        el.style.display = "none";
+        diagLines.push(p.label + ": 等待 GPS/方位資料...");
+        return;
+      }
+
+      var dist = haversineDistance(
+        viewState.currentPosition.lat, viewState.currentPosition.lng, p.lat, p.lng
+      );
+      var brg = bearingTo(
+        viewState.currentPosition.lat, viewState.currentPosition.lng, p.lat, p.lng
+      );
+      var rel = normalizeRelative(brg, viewState.currentHeading);
+      var inView = Math.abs(rel) <= halfFov;
+
+      if (inView) {
+        var xPercent = 50 + (rel / halfFov) * 50;
+        el.style.left = xPercent + "%";
+        el.style.display = "block";
+        el.innerHTML = escapeHtml(p.label) + "<span class='marker-dist'>" + dist.toFixed(1) + " m</span>";
+      } else {
+        el.style.display = "none";
+      }
+
+      diagLines.push(
+        p.label + ": bearing=" + brg.toFixed(1) + "° dist=" + dist.toFixed(1) + "m rel=" + rel.toFixed(1) +
+        "° inView=" + (inView ? "YES" : "no")
+      );
+    });
+    cleanupMarkerEls(validIds);
+
+    diagnostics.innerHTML = diagLines.map(escapeHtml).join("\n");
+  }
+
+  function startViewMode() {
+    diagnostics.textContent = "啟動相機/GPS/羅盤中...";
+    startOrientation(); // 必須直接在點擊事件呼叫鏈內，不能延遲到 promise 之後
+    startGeoWatch();
+    startCamera().then(function () {
+      startOverlay.style.display = "none";
+      if (viewState.renderTimer) clearInterval(viewState.renderTimer);
+      viewState.renderTimer = setInterval(renderFrame, 200);
+    }).catch(function (err) {
+      diagnostics.textContent = "相機啟動失敗: " + err.message;
+    });
+  }
+
+  function stopViewMode() {
+    if (viewState.stream) {
+      viewState.stream.getTracks().forEach(function (t) { t.stop(); });
+      viewState.stream = null;
+    }
+    video.srcObject = null;
+    if (viewState.watchId != null) {
+      navigator.geolocation.clearWatch(viewState.watchId);
+      viewState.watchId = null;
+    }
+    if (viewState.renderTimer) {
+      clearInterval(viewState.renderTimer);
+      viewState.renderTimer = null;
+    }
+    detachOrientationListeners();
+    viewState.currentPosition = null;
+    viewState.currentHeading = null;
+    viewState.headingSource = "尚無方位資料";
+    viewState.headingIsFallback = false;
+    viewState.gotAbsolute = false;
+    viewState.gotIosCompass = false;
+    Object.keys(viewState.markerEls).forEach(function (id) {
+      overlayLayer.removeChild(viewState.markerEls[id]);
+    });
+    viewState.markerEls = {};
+    startOverlay.style.display = "flex";
+    diagnostics.textContent = "初始化中...";
+  }
+
+  btnStartView.addEventListener("click", startViewMode);
+  btnBack.addEventListener("click", function () { switchTab("register"); });
+  btnBackFromStart.addEventListener("click", function () { switchTab("register"); });
+
+})();
+</script>
+</body>
+</html>
