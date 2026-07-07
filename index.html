@@ -210,6 +210,12 @@
   });
 
   // ===================== Register mode =====================
+  // ---- 多次取樣加權平均 可調參數 ----
+  var SAMPLE_DURATION_MS = 8000;          // 需求1: 最長收集樣本時間
+  var ACCURACY_DISCARD_THRESHOLD_M = 20;  // 需求3: accuracy 超過此值(公尺)直接捨棄不用
+  var EARLY_STOP_MIN_SAMPLES = 3;         // 需求5: 提前結束門檻 —— 最少有效樣本數
+  var EARLY_STOP_BEST_ACCURACY_M = 10;    // 需求5: 提前結束門檻 —— 其中最佳一筆需 <= 此精度(公尺)
+
   var btnRegister = document.getElementById("btnRegister");
   var registerStatus = document.getElementById("registerStatus");
   var pointList = document.getElementById("pointList");
@@ -225,7 +231,8 @@
       info.className = "point-info";
       info.innerHTML = "<b>" + escapeHtml(p.label) + "</b><br>" +
         p.lat.toFixed(6) + ", " + p.lng.toFixed(6) +
-        " (±" + (p.accuracy != null ? p.accuracy.toFixed(1) : "?") + "m)<br>" +
+        " (±" + (p.accuracy != null ? p.accuracy.toFixed(1) : "?") + "m" +
+        (p.sampleCount != null ? "，" + p.sampleCount + " 筆取樣" : "") + ")<br>" +
         "<span class='point-meta'>" + new Date(p.createdAt).toLocaleString() + "</span>";
       var delBtn = document.createElement("button");
       delBtn.className = "delete-btn";
@@ -247,40 +254,163 @@
     return d.innerHTML;
   }
 
+  // 需求4: 反變異數加權平均 —— accuracy 越小(越準)權重越高，經緯度分開加權平均。
+  // 合併後的估計精度採用反變異數加權的標準統計式: sqrt(1 / Σ(1/accuracy_i^2))，
+  // 樣本數越多、精度越好時，這個值會自然小於任何單一樣本的 accuracy。
+  function weightedAverageSamples(samples) {
+    var sumWeight = 0, sumLatW = 0, sumLngW = 0;
+    samples.forEach(function (s) {
+      var w = 1 / (s.accuracy * s.accuracy);
+      sumWeight += w;
+      sumLatW += s.lat * w;
+      sumLngW += s.lng * w;
+    });
+    return {
+      lat: sumLatW / sumWeight,
+      lng: sumLngW / sumWeight,
+      accuracy: 1 / Math.sqrt(sumWeight),
+      sampleCount: samples.length
+    };
+  }
+
+  function setRegisterButtonSampling(isSampling) {
+    btnRegister.disabled = isSampling;
+    btnRegister.textContent = isSampling ? "📡 取樣中...（請稍候，勿重複點擊）" : "📍 取得目前位置並登記地標";
+  }
+
+  var samplingState = {
+    active: false,
+    watchId: null,
+    timeoutId: null,
+    rawSamples: [],   // 需求2: 所有收到的原始讀數，用於顯示進度與 fallback
+    validSamples: []  // 需求3: 通過 ACCURACY_DISCARD_THRESHOLD_M 門檻的讀數
+  };
+
+  function stopSampling() {
+    if (samplingState.watchId != null) {
+      navigator.geolocation.clearWatch(samplingState.watchId);
+      samplingState.watchId = null;
+    }
+    if (samplingState.timeoutId != null) {
+      clearTimeout(samplingState.timeoutId);
+      samplingState.timeoutId = null;
+    }
+    samplingState.active = false;
+  }
+
+  function finishSamplingAndSave(samples) {
+    var result = weightedAverageSamples(samples);
+    var label = window.prompt(
+      "座標: " + result.lat.toFixed(6) + ", " + result.lng.toFixed(6) +
+      "\n估計精度: ±" + result.accuracy.toFixed(1) + "m（取樣 " + result.sampleCount + " 筆）\n\n請輸入這個地標的名稱:"
+    );
+    setRegisterButtonSampling(false);
+    if (label === null || label.trim() === "") {
+      registerStatus.textContent += "\n(已取消，未儲存)";
+      return;
+    }
+    var point = {
+      id: uid(), lat: result.lat, lng: result.lng, label: label.trim(),
+      accuracy: result.accuracy, sampleCount: result.sampleCount, createdAt: new Date().toISOString()
+    };
+    var points = loadPoints();
+    points.push(point);
+    savePoints(points);
+    registerStatus.textContent = "已登記：" + label.trim() + "（±" + result.accuracy.toFixed(1) + "m，" + result.sampleCount + " 筆取樣）";
+    renderPointList();
+  }
+
+  // 需求6: 8 秒內收集到的樣本全部被門檻濾掉時，詢問使用者是否仍要用最後一筆將就登記。
+  // 若同意，直接把該筆讀數當成單一樣本套用同一套加權平均公式(單樣本時公式會退化成該樣本自己)。
+  function handleSamplingDone() {
+    stopSampling();
+    var valid = samplingState.validSamples;
+
+    if (valid.length > 0) {
+      finishSamplingAndSave(valid);
+      return;
+    }
+
+    if (samplingState.rawSamples.length === 0) {
+      setRegisterButtonSampling(false);
+      registerStatus.textContent = "定位逾時，" + (SAMPLE_DURATION_MS / 1000) + " 秒內未取得任何 GPS 讀數，請確認定位權限或訊號後再試一次。";
+      return;
+    }
+
+    var lastRaw = samplingState.rawSamples[samplingState.rawSamples.length - 1];
+    var useAnyway = window.confirm(
+      "目前定位品質太差（可能在室內或訊號不佳），最後一筆讀數精度 ±" + lastRaw.accuracy.toFixed(1) +
+      "m，是否仍要使用這筆讀數登記？"
+    );
+    if (!useAnyway) {
+      setRegisterButtonSampling(false);
+      registerStatus.textContent = "已取消，未儲存。";
+      return;
+    }
+    finishSamplingAndSave([lastRaw]);
+  }
+
+  function onSamplePosition(pos) {
+    if (!samplingState.active) return;
+    var sample = {
+      lat: pos.coords.latitude,
+      lng: pos.coords.longitude,
+      accuracy: pos.coords.accuracy
+    };
+    samplingState.rawSamples.push(sample);
+    if (sample.accuracy <= ACCURACY_DISCARD_THRESHOLD_M) {
+      samplingState.validSamples.push(sample);
+    }
+
+    var bestAccuracy = samplingState.rawSamples.reduce(function (min, s) {
+      return Math.min(min, s.accuracy);
+    }, Infinity);
+
+    // 需求2: 即時顯示取樣進度
+    registerStatus.textContent = "取樣中... 已收集 " + samplingState.rawSamples.length + " 筆（有效 " +
+      samplingState.validSamples.length + " 筆），目前最佳精度 ±" + bestAccuracy.toFixed(1) + "m";
+
+    // 需求5: 提前結束取樣
+    if (samplingState.validSamples.length >= EARLY_STOP_MIN_SAMPLES) {
+      var bestValidAccuracy = samplingState.validSamples.reduce(function (min, s) {
+        return Math.min(min, s.accuracy);
+      }, Infinity);
+      if (bestValidAccuracy <= EARLY_STOP_BEST_ACCURACY_M) {
+        handleSamplingDone();
+      }
+    }
+  }
+
+  function onSampleError(err) {
+    if (!samplingState.active) return;
+    if (err.code === err.PERMISSION_DENIED) {
+      stopSampling();
+      setRegisterButtonSampling(false);
+      registerStatus.textContent = "定位失敗: " + err.message + " (code " + err.code + ")";
+      return;
+    }
+    // 其他錯誤(逾時/暫時無法定位)先忽略，讓 watchPosition 有機會拿到下一筆，
+    // 最終由 SAMPLE_DURATION_MS 逾時機制(handleSamplingDone)兜底處理。
+  }
+
   btnRegister.addEventListener("click", function () {
+    if (samplingState.active) return;
     if (!("geolocation" in navigator)) {
       registerStatus.textContent = "此裝置/瀏覽器不支援 GPS 定位";
       return;
     }
-    registerStatus.textContent = "正在取得高精度定位，請稍候...";
-    navigator.geolocation.getCurrentPosition(
-      function (pos) {
-        var lat = pos.coords.latitude;
-        var lng = pos.coords.longitude;
-        var accuracy = pos.coords.accuracy;
-        registerStatus.textContent = "座標: " + lat.toFixed(6) + ", " + lng.toFixed(6) + " (±" + accuracy.toFixed(1) + "m)";
-        var label = window.prompt(
-          "座標: " + lat.toFixed(6) + ", " + lng.toFixed(6) + "\n精度: ±" + accuracy.toFixed(1) + "m\n\n請輸入這個地標的名稱:"
-        );
-        if (label === null || label.trim() === "") {
-          registerStatus.textContent += "\n(已取消，未儲存)";
-          return;
-        }
-        var point = {
-          id: uid(), lat: lat, lng: lng, label: label.trim(),
-          accuracy: accuracy, createdAt: new Date().toISOString()
-        };
-        var points = loadPoints();
-        points.push(point);
-        savePoints(points);
-        registerStatus.textContent = "已登記：" + label.trim();
-        renderPointList();
-      },
-      function (err) {
-        registerStatus.textContent = "定位失敗: " + err.message + " (code " + err.code + ")";
-      },
-      { enableHighAccuracy: true, timeout: 20000, maximumAge: 0 }
+    samplingState.active = true;
+    samplingState.rawSamples = [];
+    samplingState.validSamples = [];
+    setRegisterButtonSampling(true);
+    registerStatus.textContent = "取樣中... 已收集 0 筆，等待第一筆 GPS 讀數...";
+
+    samplingState.watchId = navigator.geolocation.watchPosition(
+      onSamplePosition,
+      onSampleError,
+      { enableHighAccuracy: true, maximumAge: 0, timeout: SAMPLE_DURATION_MS }
     );
+    samplingState.timeoutId = setTimeout(handleSamplingDone, SAMPLE_DURATION_MS);
   });
 
   renderPointList();
