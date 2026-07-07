@@ -146,6 +146,8 @@
   var HEADING_SMOOTHING_WINDOW = 5;            // 修正2: 羅盤圓周平滑取樣數
   var LABEL_COLLISION_THRESHOLD_PERCENT = 12;  // 修正3: 視為標籤重疊的水平距離門檻(佔畫面寬度 %)
   var LABEL_COLLISION_OFFSET_PX = 60;          // 修正3: 標籤重疊時垂直錯開距離(px)
+  var LIVE_POSITION_SMOOTHING_WINDOW = 5;      // 檢視模式: 目前位置滑動視窗加權平均取樣數
+  var LIVE_POSITION_JUMP_THRESHOLD_M = 30;     // 檢視模式: 新讀數與目前平滑值超過此距離視為真實移動，重置緩衝區
 
   function uid() {
     return Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 8);
@@ -431,7 +433,8 @@
     watchId: null,
     rafId: null,           // 修正1: requestAnimationFrame 節流迴圈 id
     lastRenderTime: 0,     // 修正1: 上次實際重繪 updateAR() 的時間戳記
-    currentPosition: null, // {lat, lng, accuracy}
+    currentPosition: null, // {lat, lng, accuracy} —— 平滑後供距離/方位角計算使用
+    positionBuffer: [],    // 檢視模式: 最近 N 筆原始 GPS 讀數 {lat,lng,accuracy,timestamp}，用於滑動視窗加權平均
     currentHeading: null,  // degrees, 0-360, 0 = true north (已平滑後的值)
     headingSource: "尚無方位資料",
     headingIsFallback: false,
@@ -528,6 +531,28 @@
     });
   }
 
+  // 檢視模式的目前位置平滑 —— 跟登記模式同一套反變異數加權平均邏輯(weightedAverageSamples)，
+  // 但不能像登記模式等好幾秒，而是用「最近 N 筆的滑動視窗」即時平滑，站著不動時能濾掉
+  // GPS 原始讀數的小幅跳動；如果新讀數距離目前平滑值太遠，視為使用者真的移動了一大段，
+  // 直接清空緩衝區重新累積，避免平滑造成「明明走過去了畫面還顯示很遠」的延遲感。
+  function updateLivePosition(rawSample) {
+    if (viewState.positionBuffer.length > 0) {
+      var currentAvg = weightedAverageSamples(viewState.positionBuffer);
+      var jumpDist = haversineDistance(currentAvg.lat, currentAvg.lng, rawSample.lat, rawSample.lng);
+      if (jumpDist > LIVE_POSITION_JUMP_THRESHOLD_M) {
+        viewState.positionBuffer = [];
+      }
+    }
+
+    viewState.positionBuffer.push(rawSample);
+    if (viewState.positionBuffer.length > LIVE_POSITION_SMOOTHING_WINDOW) {
+      viewState.positionBuffer.shift();
+    }
+
+    var smoothed = weightedAverageSamples(viewState.positionBuffer);
+    viewState.currentPosition = { lat: smoothed.lat, lng: smoothed.lng, accuracy: smoothed.accuracy };
+  }
+
   function startGeoWatch() {
     if (!("geolocation" in navigator)) {
       diagnostics.textContent = "此裝置/瀏覽器不支援 GPS 定位";
@@ -535,11 +560,12 @@
     }
     viewState.watchId = navigator.geolocation.watchPosition(
       function (pos) {
-        viewState.currentPosition = {
+        updateLivePosition({
           lat: pos.coords.latitude,
           lng: pos.coords.longitude,
-          accuracy: pos.coords.accuracy
-        };
+          accuracy: pos.coords.accuracy,
+          timestamp: pos.timestamp
+        });
       },
       function (err) {
         diagnostics.textContent = "GPS 錯誤: " + err.message + " (code " + err.code + ")";
@@ -701,6 +727,7 @@
     viewState.lastRenderTime = 0;
     detachOrientationListeners();
     viewState.currentPosition = null;
+    viewState.positionBuffer = [];
     viewState.currentHeading = null;
     viewState.headingSource = "尚無方位資料";
     viewState.headingIsFallback = false;
