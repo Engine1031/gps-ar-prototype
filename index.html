@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
 <title>GPS AR 定點實驗</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 <style>
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
   html, body {
@@ -92,6 +93,31 @@
     font-size: 12px; line-height: 1.5; padding: 8px 10px; white-space: pre-wrap;
   }
   #diagnostics .warn { color: #f80; }
+
+  /* ---------- 地圖預覽 ---------- */
+  #mapScreen { padding: 0; }
+  #leafletMap { position: absolute; inset: 0; background: #222; }
+  #mapTopBar {
+    position: absolute; top: 8px; right: 8px; z-index: 500;
+    display: flex; flex-direction: column; align-items: flex-end; gap: 6px;
+  }
+  #mapTopBar button {
+    padding: 10px 14px; font-size: 14px; font-weight: bold;
+    background: #222; color: #fff; border: 1px solid #666; border-radius: 8px;
+  }
+  #mapStatus {
+    background: rgba(0, 0, 0, 0.7); color: #ff0; font-size: 12px;
+    padding: 4px 8px; border-radius: 6px; max-width: 200px; text-align: right;
+  }
+  #mapStatus:empty { display: none; }
+  .leaflet-popup-content a { color: #06c; }
+
+  /* ---------- 版本號 ---------- */
+  #appVersion {
+    position: fixed; left: 6px; bottom: 4px; z-index: 9999;
+    font-size: 10px; font-family: "SF Mono", Menlo, monospace;
+    color: rgba(255, 255, 255, 0.35); pointer-events: none; user-select: none;
+  }
 </style>
 </head>
 <body>
@@ -100,6 +126,7 @@
   <div id="tabs">
     <button class="tab-btn active" data-tab="register">登記模式</button>
     <button class="tab-btn" data-tab="view">檢視模式</button>
+    <button class="tab-btn" data-tab="map">地圖預覽</button>
   </div>
 
   <!-- ===================== 登記模式 ===================== -->
@@ -133,13 +160,26 @@
     <div id="diagnostics">初始化中...</div>
   </div>
 
+  <!-- ===================== 地圖預覽 ===================== -->
+  <div id="mapScreen" class="screen">
+    <div id="leafletMap"></div>
+    <div id="mapTopBar">
+      <button id="btnRefreshMapLocation">📍 重新整理目前位置</button>
+      <div id="mapStatus"></div>
+    </div>
+  </div>
+
 </div>
 
+<div id="appVersion"></div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
 (function () {
   "use strict";
 
   var STORAGE_KEY = "gpsArPoints_v1";
+  var APP_VERSION = "1.4.0"; // 每次改版記得同步更新
 
   // ---- 可調參數 ----
   var AR_RENDER_THROTTLE_MS = 150;             // 修正1: updateAR() 畫面重繪節流間隔(ms)
@@ -148,6 +188,9 @@
   var LABEL_COLLISION_OFFSET_PX = 60;          // 修正3: 標籤重疊時垂直錯開距離(px)
   var LIVE_POSITION_SMOOTHING_WINDOW = 5;      // 檢視模式: 目前位置滑動視窗加權平均取樣數
   var LIVE_POSITION_JUMP_THRESHOLD_M = 30;     // 檢視模式: 新讀數與目前平滑值超過此距離視為真實移動，重置緩衝區
+  var DEFAULT_MAP_CENTER = [25.0330, 121.5654]; // 地圖預覽: 完全沒有登記點也沒有目前位置時的預設中心(台北市)
+
+  document.getElementById("appVersion").textContent = "v" + APP_VERSION;
 
   function uid() {
     return Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 8);
@@ -200,12 +243,17 @@
 
   // ===================== Tabs =====================
   var tabBtns = document.querySelectorAll(".tab-btn");
-  var screens = { register: document.getElementById("registerScreen"), view: document.getElementById("viewScreen") };
+  var screens = {
+    register: document.getElementById("registerScreen"),
+    view: document.getElementById("viewScreen"),
+    map: document.getElementById("mapScreen")
+  };
 
   function switchTab(name) {
     tabBtns.forEach(function (b) { b.classList.toggle("active", b.dataset.tab === name); });
     Object.keys(screens).forEach(function (k) { screens[k].classList.toggle("active", k === name); });
     if (name !== "view") stopViewMode();
+    if (name === "map") enterMapTab();
   }
   tabBtns.forEach(function (b) {
     b.addEventListener("click", function () { switchTab(b.dataset.tab); });
@@ -747,6 +795,101 @@
   btnStartView.addEventListener("click", startViewMode);
   btnBack.addEventListener("click", function () { switchTab("register"); });
   btnBackFromStart.addEventListener("click", function () { switchTab("register"); });
+
+  // ===================== 地圖預覽 =====================
+  // 純唯讀檢視：讀取 localStorage 既有登記點做視覺化，不新增/編輯任何資料。
+  var btnRefreshMapLocation = document.getElementById("btnRefreshMapLocation");
+  var mapStatus = document.getElementById("mapStatus");
+
+  var leafletMap = null;
+  var mapMarkersLayer = null;
+  var mapCurrentLocationMarker = null;
+  var mapAutoFetchedLocationOnce = false;
+
+  function initMapIfNeeded() {
+    if (leafletMap) return;
+    leafletMap = L.map("leafletMap", { attributionControl: true }).setView(DEFAULT_MAP_CENTER, 15);
+    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      maxZoom: 19,
+      attribution: "&copy; OpenStreetMap contributors"
+    }).addTo(leafletMap);
+    mapMarkersLayer = L.layerGroup().addTo(leafletMap);
+  }
+
+  function renderMapMarkers() {
+    mapMarkersLayer.clearLayers();
+    loadPoints().forEach(function (p) {
+      var gmapsUrl = "https://www.google.com/maps/search/?api=1&query=" + p.lat + "," + p.lng;
+      L.marker([p.lat, p.lng]).addTo(mapMarkersLayer).bindPopup(
+        "<b>" + escapeHtml(p.label) + "</b><br>" +
+        "登記時間: " + new Date(p.createdAt).toLocaleString() + "<br>" +
+        "登記時精度: ±" + (p.accuracy != null ? p.accuracy.toFixed(1) : "?") + "m<br>" +
+        "<a href='" + gmapsUrl + "' target='_blank' rel='noopener noreferrer'>在 Google 地圖開啟</a>"
+      );
+    });
+  }
+
+  // 需求3: 涵蓋所有登記點 + 目前位置(若有)；沒有登記點就以目前位置為中心；都沒有就用預設中心點。
+  function fitMapView() {
+    var pointLatLngs = loadPoints().map(function (p) { return [p.lat, p.lng]; });
+
+    if (pointLatLngs.length > 0) {
+      var allLatLngs = pointLatLngs.slice();
+      if (mapCurrentLocationMarker) allLatLngs.push(mapCurrentLocationMarker.getLatLng());
+      if (allLatLngs.length === 1) {
+        leafletMap.setView(allLatLngs[0], 17);
+      } else {
+        leafletMap.fitBounds(L.latLngBounds(allLatLngs), { padding: [40, 40] });
+      }
+    } else if (mapCurrentLocationMarker) {
+      leafletMap.setView(mapCurrentLocationMarker.getLatLng(), 17);
+    } else {
+      leafletMap.setView(DEFAULT_MAP_CENTER, 15);
+    }
+  }
+
+  function refreshMapCurrentLocation() {
+    if (!("geolocation" in navigator)) {
+      mapStatus.textContent = "此裝置/瀏覽器不支援 GPS 定位";
+      return;
+    }
+    mapStatus.textContent = "定位中...";
+    navigator.geolocation.getCurrentPosition(
+      function (pos) {
+        var latLng = [pos.coords.latitude, pos.coords.longitude];
+        if (mapCurrentLocationMarker) {
+          mapCurrentLocationMarker.setLatLng(latLng);
+        } else {
+          mapCurrentLocationMarker = L.circleMarker(latLng, {
+            radius: 8, color: "#1a73e8", fillColor: "#1a73e8", fillOpacity: 0.9, weight: 2
+          }).addTo(leafletMap).bindPopup("目前位置");
+        }
+        mapStatus.textContent = "";
+        fitMapView();
+      },
+      function (err) {
+        mapStatus.textContent = "定位失敗: " + err.message + " (code " + err.code + ")";
+      },
+      { enableHighAccuracy: true, timeout: 15000, maximumAge: 5000 }
+    );
+  }
+
+  function enterMapTab() {
+    initMapIfNeeded();
+    renderMapMarkers();
+    fitMapView();
+    // 剛從 display:none 切成可見時容器尺寸才會確定，下一輪畫面更新後要通知 Leaflet 重新量測。
+    requestAnimationFrame(function () {
+      leafletMap.invalidateSize();
+      fitMapView();
+    });
+    if (!mapAutoFetchedLocationOnce) {
+      mapAutoFetchedLocationOnce = true;
+      refreshMapCurrentLocation(); // 需求3: 只在第一次進入時自動抓一次，之後靠手動按鈕更新，避免不必要耗電
+    }
+  }
+
+  btnRefreshMapLocation.addEventListener("click", refreshMapCurrentLocation);
 
 })();
 </script>
