@@ -112,6 +112,21 @@
   #mapStatus:empty { display: none; }
   .leaflet-popup-content a { color: #06c; }
 
+  #btnClearMeasure { display: none; }
+  #measureResultBar {
+    position: absolute; bottom: 12px; left: 50%; transform: translateX(-50%); z-index: 500;
+    background: rgba(0, 0, 0, 0.8); color: #ff0; font-size: 13px; font-weight: bold;
+    padding: 8px 14px; border-radius: 8px; max-width: 90%; text-align: center; display: none;
+  }
+  .measure-selected-icon-inner {
+    width: 22px; height: 22px; border-radius: 50%;
+    background: #ffcc00; border: 3px solid #fff; box-shadow: 0 0 8px rgba(255, 204, 0, 0.9);
+  }
+  .measure-distance-tooltip {
+    background: rgba(0, 0, 0, 0.85); color: #ffcc00; font-weight: bold; font-size: 13px; border: none;
+  }
+  .measure-distance-tooltip::before { display: none; }
+
   /* ---------- 版本號 ---------- */
   #appVersion {
     position: fixed; left: 6px; bottom: 4px; z-index: 9999;
@@ -165,8 +180,11 @@
     <div id="leafletMap"></div>
     <div id="mapTopBar">
       <button id="btnRefreshMapLocation">📍 重新整理目前位置</button>
+      <button id="btnToggleMeasureMode">📏 量測模式：關閉</button>
+      <button id="btnClearMeasure">🧹 清除量測</button>
       <div id="mapStatus"></div>
     </div>
+    <div id="measureResultBar"></div>
   </div>
 
 </div>
@@ -179,7 +197,7 @@
   "use strict";
 
   var STORAGE_KEY = "gpsArPoints_v1";
-  var APP_VERSION = "1.4.0"; // 每次改版記得同步更新
+  var APP_VERSION = "1.5.0"; // 每次改版記得同步更新
 
   // ---- 可調參數 ----
   var AR_RENDER_THROTTLE_MS = 150;             // 修正1: updateAR() 畫面重繪節流間隔(ms)
@@ -189,6 +207,8 @@
   var LIVE_POSITION_SMOOTHING_WINDOW = 5;      // 檢視模式: 目前位置滑動視窗加權平均取樣數
   var LIVE_POSITION_JUMP_THRESHOLD_M = 30;     // 檢視模式: 新讀數與目前平滑值超過此距離視為真實移動，重置緩衝區
   var DEFAULT_MAP_CENTER = [25.0330, 121.5654]; // 地圖預覽: 完全沒有登記點也沒有目前位置時的預設中心(台北市)
+  var MAP_MAX_ZOOM = 19;              // 調整1: OpenStreetMap 標準圖磚可用的最大 zoom
+  var MAP_TILE_ERROR_THRESHOLD = 3;   // 調整1: 同一 zoom 等級累積這麼多次圖磚載入失敗，就自動退回上一級
 
   document.getElementById("appVersion").textContent = "v" + APP_VERSION;
 
@@ -799,33 +819,129 @@
   // ===================== 地圖預覽 =====================
   // 純唯讀檢視：讀取 localStorage 既有登記點做視覺化，不新增/編輯任何資料。
   var btnRefreshMapLocation = document.getElementById("btnRefreshMapLocation");
+  var btnToggleMeasureMode = document.getElementById("btnToggleMeasureMode");
+  var btnClearMeasure = document.getElementById("btnClearMeasure");
   var mapStatus = document.getElementById("mapStatus");
+  var measureResultBar = document.getElementById("measureResultBar");
 
   var leafletMap = null;
   var mapMarkersLayer = null;
   var mapCurrentLocationMarker = null;
   var mapAutoFetchedLocationOnce = false;
 
+  // 調整2: 量測模式狀態
+  var measureModeActive = false;
+  var mapMarkerRefs = [];       // {point, marker, popupHtml} 供切換量測模式時動態綁定/解除 popup
+  var measureFirstPoint = null; // 目前選取的量測起點 {point, marker}
+  var measureActiveMarkers = []; // 目前套用「已選取」圖示的 marker，供清除時還原成預設圖示
+  var measureLine = null;       // 兩點間的量測連線 (L.Polyline)
+  var measureSelectedIcon = L.divIcon({
+    className: "measure-selected-icon",
+    html: "<div class='measure-selected-icon-inner'></div>",
+    iconSize: [22, 22],
+    iconAnchor: [11, 11]
+  });
+
   function initMapIfNeeded() {
     if (leafletMap) return;
     leafletMap = L.map("leafletMap", { attributionControl: true }).setView(DEFAULT_MAP_CENTER, 15);
-    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-      maxZoom: 19,
+    var tileLayer = L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      maxZoom: MAP_MAX_ZOOM,
       attribution: "&copy; OpenStreetMap contributors"
     }).addTo(leafletMap);
     mapMarkersLayer = L.layerGroup().addTo(leafletMap);
+
+    // 調整1: 偏僻地點常常在高 zoom 等級沒有圖磚資料(伺服器回404觸發 tileerror)，
+    // 累積同一 zoom 等級的失敗次數，超過門檻就自動退回上一級，不讓畫面卡在空白/模糊狀態。
+    var tileErrorCounts = {};
+    tileLayer.on("tileerror", function () {
+      var z = leafletMap.getZoom();
+      tileErrorCounts[z] = (tileErrorCounts[z] || 0) + 1;
+      if (tileErrorCounts[z] >= MAP_TILE_ERROR_THRESHOLD && z > leafletMap.getMinZoom()) {
+        leafletMap.setZoom(z - 1);
+      }
+    });
+    leafletMap.on("zoomstart", function () {
+      tileErrorCounts = {};
+    });
+  }
+
+  // 調整2: 量測模式下點擊 marker 不開彈出視窗，改成選取量測起點/終點。
+  function onMapMarkerClick(point, marker) {
+    if (!measureModeActive) return;
+    if (measureFirstPoint && measureFirstPoint.point.id === point.id) return; // 同一點不重複處理
+
+    if (!measureFirstPoint) {
+      // 需求2: 上一輪量測已結束(或還沒開始)時點任一 marker，都視為開始新一輪，先清掉舊的連線/選取樣式
+      clearMeasurementVisuals();
+      measureFirstPoint = { point: point, marker: marker };
+      marker.setIcon(measureSelectedIcon);
+      measureActiveMarkers.push(marker);
+      measureResultBar.textContent = "量測模式：已選「" + point.label + "」，請點選第二個登記點...";
+      measureResultBar.style.display = "block";
+      return;
+    }
+
+    var first = measureFirstPoint;
+    var dist = haversineDistance(first.point.lat, first.point.lng, point.lat, point.lng);
+    measureLine = L.polyline(
+      [[first.point.lat, first.point.lng], [point.lat, point.lng]],
+      { color: "#ffcc00", weight: 3, dashArray: "6,8" }
+    ).addTo(leafletMap);
+    measureLine.bindTooltip(dist.toFixed(1) + " m", {
+      permanent: true, direction: "center", className: "measure-distance-tooltip"
+    }).openTooltip();
+    marker.setIcon(measureSelectedIcon);
+    measureActiveMarkers.push(marker);
+    measureResultBar.textContent = first.point.label + " → " + point.label + "：" + dist.toFixed(1) + " 公尺";
+    measureResultBar.style.display = "block";
+    measureFirstPoint = null; // 回到「等待下一輪新起點」狀態；下次點擊任一 marker 即開始新一輪量測
+  }
+
+  // 需求2: 清除所有選取樣式與量測結果(切換量測模式開關、按下清除按鈕、或重新進入頁籤時呼叫)
+  function clearMeasurementVisuals() {
+    measureActiveMarkers.forEach(function (m) { m.setIcon(new L.Icon.Default()); });
+    measureActiveMarkers = [];
+    if (measureLine) {
+      leafletMap.removeLayer(measureLine);
+      measureLine = null;
+    }
+    measureFirstPoint = null;
+    measureResultBar.textContent = "";
+    measureResultBar.style.display = "none";
+  }
+
+  function setMeasureMode(active) {
+    measureModeActive = active;
+    clearMeasurementVisuals();
+    mapMarkerRefs.forEach(function (ref) {
+      if (measureModeActive) {
+        ref.marker.unbindPopup(); // 量測模式下停用預設彈出視窗，改由 onMapMarkerClick 處理點擊
+      } else {
+        ref.marker.bindPopup(ref.popupHtml);
+      }
+    });
+    btnToggleMeasureMode.textContent = measureModeActive ? "📏 量測模式：開啟" : "📏 量測模式：關閉";
+    btnClearMeasure.style.display = measureModeActive ? "inline-block" : "none";
+    if (measureModeActive) {
+      measureResultBar.textContent = "量測模式：請點選第一個登記點...";
+      measureResultBar.style.display = "block";
+    }
   }
 
   function renderMapMarkers() {
     mapMarkersLayer.clearLayers();
+    mapMarkerRefs = [];
     loadPoints().forEach(function (p) {
       var gmapsUrl = "https://www.google.com/maps/search/?api=1&query=" + p.lat + "," + p.lng;
-      L.marker([p.lat, p.lng]).addTo(mapMarkersLayer).bindPopup(
-        "<b>" + escapeHtml(p.label) + "</b><br>" +
+      var popupHtml = "<b>" + escapeHtml(p.label) + "</b><br>" +
         "登記時間: " + new Date(p.createdAt).toLocaleString() + "<br>" +
         "登記時精度: ±" + (p.accuracy != null ? p.accuracy.toFixed(1) : "?") + "m<br>" +
-        "<a href='" + gmapsUrl + "' target='_blank' rel='noopener noreferrer'>在 Google 地圖開啟</a>"
-      );
+        "<a href='" + gmapsUrl + "' target='_blank' rel='noopener noreferrer'>在 Google 地圖開啟</a>";
+      var marker = L.marker([p.lat, p.lng]).addTo(mapMarkersLayer);
+      if (!measureModeActive) marker.bindPopup(popupHtml);
+      marker.on("click", function () { onMapMarkerClick(p, marker); });
+      mapMarkerRefs.push({ point: p, marker: marker, popupHtml: popupHtml });
     });
   }
 
@@ -876,6 +992,21 @@
 
   function enterMapTab() {
     initMapIfNeeded();
+
+    // 每次重新進入頁籤都還原成未量測狀態：markers 即將被 renderMapMarkers() 整組換新，
+    // 舊的量測連線/選取樣式參照的是即將銷毀的 marker 物件，直接重置狀態避免殘留。
+    measureModeActive = false;
+    measureFirstPoint = null;
+    measureActiveMarkers = [];
+    if (measureLine) {
+      leafletMap.removeLayer(measureLine);
+      measureLine = null;
+    }
+    btnToggleMeasureMode.textContent = "📏 量測模式：關閉";
+    btnClearMeasure.style.display = "none";
+    measureResultBar.textContent = "";
+    measureResultBar.style.display = "none";
+
     renderMapMarkers();
     fitMapView();
     // 剛從 display:none 切成可見時容器尺寸才會確定，下一輪畫面更新後要通知 Leaflet 重新量測。
@@ -890,6 +1021,14 @@
   }
 
   btnRefreshMapLocation.addEventListener("click", refreshMapCurrentLocation);
+  btnToggleMeasureMode.addEventListener("click", function () { setMeasureMode(!measureModeActive); });
+  btnClearMeasure.addEventListener("click", function () {
+    clearMeasurementVisuals();
+    if (measureModeActive) {
+      measureResultBar.textContent = "量測模式：請點選第一個登記點...";
+      measureResultBar.style.display = "block";
+    }
+  });
 
 })();
 </script>
