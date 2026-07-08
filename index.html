@@ -47,7 +47,26 @@
   .point-info b { font-size: 17px; color: #0f8; }
   .point-meta { color: #999; font-size: 12px; font-family: monospace; }
   .delete-btn { background: #a00; color: #fff; border: none; border-radius: 8px; padding: 10px 14px; font-size: 15px; flex: 0 0 auto; }
+  .delete-btn:disabled { opacity: 0.4; }
   #emptyHint { color: #777; font-size: 14px; padding: 20px 0; text-align: center; }
+  .sampling-badge { color: #ff0; font-weight: bold; }
+
+  /* ---------- 標籤輸入 modal(與定位採樣解耦) ---------- */
+  .modal-overlay {
+    position: fixed; inset: 0; z-index: 2000; background: rgba(0, 0, 0, 0.75);
+    display: none; align-items: center; justify-content: center; padding: 20px;
+  }
+  .modal-overlay.active { display: flex; }
+  .modal-box { background: #181818; border: 1px solid #444; border-radius: 14px; padding: 20px; width: 100%; max-width: 360px; }
+  .modal-coords { font-size: 13px; color: #9f9; margin-bottom: 8px; }
+  .modal-progress { font-size: 14px; color: #ff0; margin-bottom: 14px; min-height: 20px; }
+  .modal-input {
+    width: 100%; padding: 14px; font-size: 18px; background: #0d0d0d; color: #fff;
+    border: 2px solid #666; border-radius: 10px; margin-bottom: 14px;
+  }
+  .modal-actions { display: flex; gap: 10px; }
+  .modal-actions button { flex: 1; margin-bottom: 0; }
+  .modal-actions button:disabled { opacity: 0.4; }
 
   /* ---------- View / AR mode ---------- */
   #viewScreen { background: #000; }
@@ -150,6 +169,18 @@
     <div id="registerStatus"></div>
     <ul id="pointList"></ul>
     <div id="emptyHint">尚未登記任何地標</div>
+
+    <div id="labelModalOverlay" class="modal-overlay">
+      <div class="modal-box">
+        <div id="labelModalCoords" class="modal-coords">GPS 定位中，可以直接輸入標籤，不用等定位完成</div>
+        <div id="labelModalProgress" class="modal-progress"></div>
+        <input id="labelModalInput" type="text" class="modal-input" placeholder="請輸入這個地標的名稱">
+        <div class="modal-actions">
+          <button id="labelModalCancel">取消</button>
+          <button id="labelModalConfirm" disabled>確認</button>
+        </div>
+      </div>
+    </div>
   </div>
 
   <!-- ===================== 檢視模式 ===================== -->
@@ -197,7 +228,7 @@
   "use strict";
 
   var STORAGE_KEY = "gpsArPoints_v1";
-  var APP_VERSION = "1.5.0"; // 每次改版記得同步更新
+  var APP_VERSION = "1.6.0"; // 每次改版記得同步更新
 
   // ---- 可調參數 ----
   var AR_RENDER_THROTTLE_MS = 150;             // 修正1: updateAR() 畫面重繪節流間隔(ms)
@@ -281,37 +312,67 @@
 
   // ===================== Register mode =====================
   // ---- 多次取樣加權平均 可調參數 ----
-  var SAMPLE_DURATION_MS = 8000;          // 需求1: 最長收集樣本時間
-  var ACCURACY_DISCARD_THRESHOLD_M = 20;  // 需求3: accuracy 超過此值(公尺)直接捨棄不用
-  var EARLY_STOP_MIN_SAMPLES = 3;         // 需求5: 提前結束門檻 —— 最少有效樣本數
-  var EARLY_STOP_BEST_ACCURACY_M = 10;    // 需求5: 提前結束門檻 —— 其中最佳一筆需 <= 此精度(公尺)
+  var SAMPLE_DURATION_MS = 18000;         // 調整1: 最長收集樣本時間(原8秒拉長為18秒，測精度天花板)
+  var ACCURACY_DISCARD_THRESHOLD_M = 20;  // accuracy 超過此值(公尺)直接捨棄不用
+  var EARLY_STOP_MIN_SAMPLES = 6;         // 調整1: 提前結束門檻 —— 最少有效樣本數(原3筆提高為6筆)
+  var EARLY_STOP_BEST_ACCURACY_M = 10;    // 提前結束門檻 —— 其中最佳一筆需 <= 此精度(公尺)，維持不變
 
   var btnRegister = document.getElementById("btnRegister");
   var registerStatus = document.getElementById("registerStatus");
   var pointList = document.getElementById("pointList");
   var emptyHint = document.getElementById("emptyHint");
+  var labelModalOverlay = document.getElementById("labelModalOverlay");
+  var labelModalProgress = document.getElementById("labelModalProgress");
+  var labelModalInput = document.getElementById("labelModalInput");
+  var labelModalConfirm = document.getElementById("labelModalConfirm");
+  var labelModalCancel = document.getElementById("labelModalCancel");
+
+  // 調整2: 取樣與輸入標籤解耦後，「這一筆正在登記中的記錄」用這個變數代表，
+  // 直到標籤已確認(labelConfirmed) 且背景取樣已完成(samplingDone) 兩者都成立，
+  // 才會真正寫進 localStorage 的正式清單；在那之前完全不寫入 localStorage，
+  // 只在畫面上以「定位中...」樣式顯示，重新整理分頁遺失這筆是可接受的。
+  var pendingRegistration = null;
 
   function renderPointList() {
     var points = loadPoints();
+    var displayItems = points.slice();
+    if (pendingRegistration && pendingRegistration.labelConfirmed && !pendingRegistration.samplingDone) {
+      displayItems.push({
+        id: pendingRegistration.id,
+        label: pendingRegistration.label,
+        status: "sampling",
+        createdAt: pendingRegistration.createdAt
+      });
+    }
+
     pointList.innerHTML = "";
-    emptyHint.style.display = points.length === 0 ? "block" : "none";
-    points.slice().reverse().forEach(function (p) {
+    emptyHint.style.display = displayItems.length === 0 ? "block" : "none";
+    displayItems.slice().reverse().forEach(function (p) {
       var li = document.createElement("li");
       var info = document.createElement("div");
       info.className = "point-info";
-      info.innerHTML = "<b>" + escapeHtml(p.label) + "</b><br>" +
-        p.lat.toFixed(6) + ", " + p.lng.toFixed(6) +
-        " (±" + (p.accuracy != null ? p.accuracy.toFixed(1) : "?") + "m" +
-        (p.sampleCount != null ? "，" + p.sampleCount + " 筆取樣" : "") + ")<br>" +
-        "<span class='point-meta'>" + new Date(p.createdAt).toLocaleString() + "</span>";
+      if (p.status === "sampling") {
+        info.innerHTML = "<b>" + escapeHtml(p.label) + "</b><br>" +
+          "<span class='sampling-badge'>📡 定位中...（完成後會自動儲存）</span>";
+      } else {
+        info.innerHTML = "<b>" + escapeHtml(p.label) + "</b><br>" +
+          p.lat.toFixed(6) + ", " + p.lng.toFixed(6) +
+          " (±" + (p.accuracy != null ? p.accuracy.toFixed(1) : "?") + "m" +
+          (p.sampleCount != null ? "，" + p.sampleCount + " 筆取樣" : "") + ")<br>" +
+          "<span class='point-meta'>" + new Date(p.createdAt).toLocaleString() + "</span>";
+      }
       var delBtn = document.createElement("button");
       delBtn.className = "delete-btn";
       delBtn.textContent = "刪除";
-      delBtn.addEventListener("click", function () {
-        var all = loadPoints().filter(function (x) { return x.id !== p.id; });
-        savePoints(all);
-        renderPointList();
-      });
+      if (p.status === "sampling") {
+        delBtn.disabled = true; // 還沒正式存檔，沒有對應的 localStorage 紀錄可刪
+      } else {
+        delBtn.addEventListener("click", function () {
+          var all = loadPoints().filter(function (x) { return x.id !== p.id; });
+          savePoints(all);
+          renderPointList();
+        });
+      }
       li.appendChild(info);
       li.appendChild(delBtn);
       pointList.appendChild(li);
@@ -324,7 +385,7 @@
     return d.innerHTML;
   }
 
-  // 需求4: 反變異數加權平均 —— accuracy 越小(越準)權重越高，經緯度分開加權平均。
+  // 反變異數加權平均 —— accuracy 越小(越準)權重越高，經緯度分開加權平均。
   // 合併後的估計精度採用反變異數加權的標準統計式: sqrt(1 / Σ(1/accuracy_i^2))，
   // 樣本數越多、精度越好時，這個值會自然小於任何單一樣本的 accuracy。
   function weightedAverageSamples(samples) {
@@ -343,17 +404,19 @@
     };
   }
 
-  function setRegisterButtonSampling(isSampling) {
-    btnRegister.disabled = isSampling;
-    btnRegister.textContent = isSampling ? "📡 取樣中...（請稍候，勿重複點擊）" : "📍 取得目前位置並登記地標";
+  // 需求3: 只要有 pendingRegistration 存在(標籤還沒確認，或已確認但背景取樣還沒完成)，
+  // 「登記目前位置」按鈕就整個鎖住，避免兩組 watchPosition 同時在跑。
+  function setRegisterButtonSampling(isLocked) {
+    btnRegister.disabled = isLocked;
+    btnRegister.textContent = isLocked ? "⏳ 請等待上一筆定位完成..." : "📍 取得目前位置並登記地標";
   }
 
   var samplingState = {
     active: false,
     watchId: null,
     timeoutId: null,
-    rawSamples: [],   // 需求2: 所有收到的原始讀數，用於顯示進度與 fallback
-    validSamples: []  // 需求3: 通過 ACCURACY_DISCARD_THRESHOLD_M 門檻的讀數
+    rawSamples: [],   // 所有收到的原始讀數，用於顯示進度與 fallback
+    validSamples: []  // 通過 ACCURACY_DISCARD_THRESHOLD_M 門檻的讀數
   };
 
   function stopSampling() {
@@ -368,42 +431,74 @@
     samplingState.active = false;
   }
 
-  function finishSamplingAndSave(samples) {
-    var result = weightedAverageSamples(samples);
-    var label = window.prompt(
-      "座標: " + result.lat.toFixed(6) + ", " + result.lng.toFixed(6) +
-      "\n估計精度: ±" + result.accuracy.toFixed(1) + "m（取樣 " + result.sampleCount + " 筆）\n\n請輸入這個地標的名稱:"
-    );
-    setRegisterButtonSampling(false);
-    if (label === null || label.trim() === "") {
-      registerStatus.textContent += "\n(已取消，未儲存)";
-      return;
-    }
+  function openLabelModal() {
+    labelModalInput.value = "";
+    labelModalConfirm.disabled = true;
+    labelModalProgress.textContent = "取樣中... 已收集 0 筆，等待第一筆 GPS 讀數...";
+    labelModalOverlay.classList.add("active");
+    labelModalInput.focus();
+  }
+
+  function closeLabelModal() {
+    labelModalOverlay.classList.remove("active");
+  }
+
+  // 調整2: 標籤確認與背景取樣完成，兩件事誰先誰後都要能正確運作 ——
+  // 只有當「標籤已確認」且「取樣已完成」都成立時，才正式寫入 localStorage。
+  function tryFinalizeRegistration() {
+    if (!pendingRegistration) return;
+    if (!pendingRegistration.labelConfirmed || !pendingRegistration.samplingDone) return;
+
+    var result = pendingRegistration.samplingResult;
     var point = {
-      id: uid(), lat: result.lat, lng: result.lng, label: label.trim(),
-      accuracy: result.accuracy, sampleCount: result.sampleCount, createdAt: new Date().toISOString()
+      id: pendingRegistration.id, lat: result.lat, lng: result.lng, label: pendingRegistration.label,
+      accuracy: result.accuracy, sampleCount: result.sampleCount,
+      createdAt: pendingRegistration.createdAt, status: "done"
     };
     var points = loadPoints();
     points.push(point);
     savePoints(points);
-    registerStatus.textContent = "已登記：" + label.trim() + "（±" + result.accuracy.toFixed(1) + "m，" + result.sampleCount + " 筆取樣）";
+    registerStatus.textContent = "已登記：" + point.label + "（±" + result.accuracy.toFixed(1) + "m，" + result.sampleCount + " 筆取樣）";
+    pendingRegistration = null;
+    setRegisterButtonSampling(false);
     renderPointList();
   }
 
-  // 需求6: 8 秒內收集到的樣本全部被門檻濾掉時，詢問使用者是否仍要用最後一筆將就登記。
+  function completeBackgroundSampling(samples) {
+    var result = weightedAverageSamples(samples);
+    if (!pendingRegistration) return; // 理論上不會發生(取消時會一併中止取樣)，防禦性檢查
+    pendingRegistration.samplingResult = result;
+    pendingRegistration.samplingDone = true;
+    if (!pendingRegistration.labelConfirmed) {
+      labelModalProgress.textContent = "定位完成（±" + result.accuracy.toFixed(1) + "m，" + result.sampleCount +
+        " 筆取樣），請輸入標籤後按確認";
+    }
+    tryFinalizeRegistration();
+  }
+
+  function abortPendingRegistration(message) {
+    pendingRegistration = null;
+    setRegisterButtonSampling(false);
+    closeLabelModal();
+    registerStatus.textContent = message;
+    renderPointList();
+  }
+
+  // 需求6: 收集到的樣本全部被門檻濾掉時，詢問使用者是否仍要用最後一筆將就登記。
   // 若同意，直接把該筆讀數當成單一樣本套用同一套加權平均公式(單樣本時公式會退化成該樣本自己)。
   function handleSamplingDone() {
     stopSampling();
     var valid = samplingState.validSamples;
 
     if (valid.length > 0) {
-      finishSamplingAndSave(valid);
+      completeBackgroundSampling(valid);
       return;
     }
 
     if (samplingState.rawSamples.length === 0) {
-      setRegisterButtonSampling(false);
-      registerStatus.textContent = "定位逾時，" + (SAMPLE_DURATION_MS / 1000) + " 秒內未取得任何 GPS 讀數，請確認定位權限或訊號後再試一次。";
+      abortPendingRegistration(
+        "定位逾時，" + (SAMPLE_DURATION_MS / 1000) + " 秒內未取得任何 GPS 讀數，請確認定位權限或訊號後再試一次。"
+      );
       return;
     }
 
@@ -413,11 +508,10 @@
       "m，是否仍要使用這筆讀數登記？"
     );
     if (!useAnyway) {
-      setRegisterButtonSampling(false);
-      registerStatus.textContent = "已取消，未儲存。";
+      abortPendingRegistration("已取消，未儲存。");
       return;
     }
-    finishSamplingAndSave([lastRaw]);
+    completeBackgroundSampling([lastRaw]);
   }
 
   function onSamplePosition(pos) {
@@ -436,9 +530,11 @@
       return Math.min(min, s.accuracy);
     }, Infinity);
 
-    // 需求2: 即時顯示取樣進度
-    registerStatus.textContent = "取樣中... 已收集 " + samplingState.rawSamples.length + " 筆（有效 " +
+    // 需求2: 即時顯示取樣進度，輸入框開著的話同步顯示在輸入框內
+    var progressText = "取樣中... 已收集 " + samplingState.rawSamples.length + " 筆（有效 " +
       samplingState.validSamples.length + " 筆），目前最佳精度 ±" + bestAccuracy.toFixed(1) + "m";
+    registerStatus.textContent = progressText;
+    labelModalProgress.textContent = progressText;
 
     // 需求5: 提前結束取樣
     if (samplingState.validSamples.length >= EARLY_STOP_MIN_SAMPLES) {
@@ -455,25 +551,54 @@
     if (!samplingState.active) return;
     if (err.code === err.PERMISSION_DENIED) {
       stopSampling();
-      setRegisterButtonSampling(false);
-      registerStatus.textContent = "定位失敗: " + err.message + " (code " + err.code + ")";
+      abortPendingRegistration("定位失敗: " + err.message + " (code " + err.code + ")");
       return;
     }
     // 其他錯誤(逾時/暫時無法定位)先忽略，讓 watchPosition 有機會拿到下一筆，
     // 最終由 SAMPLE_DURATION_MS 逾時機制(handleSamplingDone)兜底處理。
   }
 
+  labelModalInput.addEventListener("input", function () {
+    labelModalConfirm.disabled = labelModalInput.value.trim().length === 0;
+  });
+  labelModalInput.addEventListener("keydown", function (e) {
+    if (e.key === "Enter" && !labelModalConfirm.disabled) labelModalConfirm.click();
+  });
+
+  labelModalConfirm.addEventListener("click", function () {
+    var label = labelModalInput.value.trim();
+    if (!label || !pendingRegistration) return;
+    pendingRegistration.label = label;
+    pendingRegistration.labelConfirmed = true;
+    closeLabelModal();
+    renderPointList(); // 需求4: 立刻在列表顯示「定位中...」的這一筆
+    tryFinalizeRegistration(); // 如果背景取樣其實已經先跑完了，這裡會直接完成存檔
+  });
+
+  labelModalCancel.addEventListener("click", function () {
+    stopSampling();
+    abortPendingRegistration("已取消，未儲存。");
+  });
+
   btnRegister.addEventListener("click", function () {
-    if (samplingState.active) return;
+    if (samplingState.active || pendingRegistration) return; // 需求3: 上一筆還沒結束就整個鎖住
     if (!("geolocation" in navigator)) {
       registerStatus.textContent = "此裝置/瀏覽器不支援 GPS 定位";
       return;
     }
+
+    pendingRegistration = {
+      id: uid(), label: null, labelConfirmed: false,
+      samplingResult: null, samplingDone: false,
+      createdAt: new Date().toISOString()
+    };
+
     samplingState.active = true;
     samplingState.rawSamples = [];
     samplingState.validSamples = [];
     setRegisterButtonSampling(true);
     registerStatus.textContent = "取樣中... 已收集 0 筆，等待第一筆 GPS 讀數...";
+    openLabelModal(); // 需求2: 立刻彈出輸入框，不用等取樣完成
 
     samplingState.watchId = navigator.geolocation.watchPosition(
       onSamplePosition,
