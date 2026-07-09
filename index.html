@@ -146,6 +146,21 @@
   }
   .measure-distance-tooltip::before { display: none; }
 
+  /* ---------- 編輯模式 ---------- */
+  #btnSelectRecent { display: none; }
+  .edit-selected-icon-inner {
+    width: 22px; height: 22px; border-radius: 50%;
+    background: #ff7b00; border: 3px solid #fff; box-shadow: 0 0 8px rgba(255, 123, 0, 0.9);
+  }
+  .edit-popup-status { font-size: 12px; color: #555; margin: 4px 0; }
+  .edit-popup-status.edited { color: #c60; font-weight: bold; }
+  .edit-popup-actions { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
+  .edit-popup-actions button {
+    padding: 8px 10px; font-size: 13px; font-weight: bold;
+    background: #333; color: #fff; border: 1px solid #666; border-radius: 6px; cursor: pointer;
+  }
+  .popup-edited-flag { color: #c60; font-weight: bold; font-size: 12px; }
+
   /* ---------- 版本號 ---------- */
   #appVersion {
     position: fixed; left: 6px; bottom: 4px; z-index: 9999;
@@ -213,6 +228,8 @@
       <button id="btnRefreshMapLocation">📍 重新整理目前位置</button>
       <button id="btnToggleMeasureMode">📏 量測模式：關閉</button>
       <button id="btnClearMeasure">🧹 清除量測</button>
+      <button id="btnToggleEditMode">✏️ 編輯模式：關閉</button>
+      <button id="btnSelectRecent">🕐 選取最近 5 筆</button>
       <div id="mapStatus"></div>
     </div>
     <div id="measureResultBar"></div>
@@ -228,7 +245,7 @@
   "use strict";
 
   var STORAGE_KEY = "gpsArPoints_v1";
-  var APP_VERSION = "1.6.0"; // 每次改版記得同步更新
+  var APP_VERSION = "1.7.0"; // 每次改版記得同步更新
 
   // ---- 可調參數 ----
   var AR_RENDER_THROTTLE_MS = 150;             // 修正1: updateAR() 畫面重繪節流間隔(ms)
@@ -240,6 +257,7 @@
   var DEFAULT_MAP_CENTER = [25.0330, 121.5654]; // 地圖預覽: 完全沒有登記點也沒有目前位置時的預設中心(台北市)
   var MAP_MAX_ZOOM = 19;              // 調整1: OpenStreetMap 標準圖磚可用的最大 zoom
   var MAP_TILE_ERROR_THRESHOLD = 3;   // 調整1: 同一 zoom 等級累積這麼多次圖磚載入失敗，就自動退回上一級
+  var RECENT_SELECT_COUNT = 5;        // 編輯模式: 「選取最近 N 筆」一鍵選取的數量
 
   document.getElementById("appVersion").textContent = "v" + APP_VERSION;
 
@@ -452,6 +470,7 @@
     var result = pendingRegistration.samplingResult;
     var point = {
       id: pendingRegistration.id, lat: result.lat, lng: result.lng, label: pendingRegistration.label,
+      originalLat: result.lat, originalLng: result.lng, // 編輯模式: 保留 GPS 原始測量座標，lat/lng 之後可被人工修正
       accuracy: result.accuracy, sampleCount: result.sampleCount,
       createdAt: pendingRegistration.createdAt, status: "done"
     };
@@ -942,10 +961,14 @@
   btnBackFromStart.addEventListener("click", function () { switchTab("register"); });
 
   // ===================== 地圖預覽 =====================
-  // 純唯讀檢視：讀取 localStorage 既有登記點做視覺化，不新增/編輯任何資料。
+  // 檢視 + 量測 + 編輯：讀取 localStorage 登記點做視覺化；編輯模式可拖曳修正座標，
+  // lat/lng 為「目前生效座標」(AR 檢視/量測都讀它)，originalLat/originalLng 保留 GPS 原始值，
+  // editHistory 記錄每次人工修正供回溯。
   var btnRefreshMapLocation = document.getElementById("btnRefreshMapLocation");
   var btnToggleMeasureMode = document.getElementById("btnToggleMeasureMode");
   var btnClearMeasure = document.getElementById("btnClearMeasure");
+  var btnToggleEditMode = document.getElementById("btnToggleEditMode");
+  var btnSelectRecent = document.getElementById("btnSelectRecent");
   var mapStatus = document.getElementById("mapStatus");
   var measureResultBar = document.getElementById("measureResultBar");
 
@@ -956,13 +979,23 @@
 
   // 調整2: 量測模式狀態
   var measureModeActive = false;
-  var mapMarkerRefs = [];       // {point, marker, popupHtml} 供切換量測模式時動態綁定/解除 popup
+  var mapMarkerRefs = [];       // {point, marker} 供選取樣式套用與模式切換重繪
   var measureFirstPoint = null; // 目前選取的量測起點 {point, marker}
   var measureActiveMarkers = []; // 目前套用「已選取」圖示的 marker，供清除時還原成預設圖示
   var measureLine = null;       // 兩點間的量測連線 (L.Polyline)
   var measureSelectedIcon = L.divIcon({
     className: "measure-selected-icon",
     html: "<div class='measure-selected-icon-inner'></div>",
+    iconSize: [22, 22],
+    iconAnchor: [11, 11]
+  });
+
+  // 編輯模式狀態
+  var editModeActive = false;
+  var editSelectedIds = []; // 已選取(可拖曳)的登記點 id 集合
+  var editSelectedIcon = L.divIcon({
+    className: "edit-selected-icon",
+    html: "<div class='edit-selected-icon-inner'></div>",
     iconSize: [22, 22],
     iconAnchor: [11, 11]
   });
@@ -1036,16 +1069,12 @@
     measureResultBar.style.display = "none";
   }
 
+  // 與編輯模式互斥：開啟其中一個會自動關閉另一個(關閉方向不會反向觸發，不會遞迴)
   function setMeasureMode(active) {
+    if (active && editModeActive) setEditMode(false);
     measureModeActive = active;
     clearMeasurementVisuals();
-    mapMarkerRefs.forEach(function (ref) {
-      if (measureModeActive) {
-        ref.marker.unbindPopup(); // 量測模式下停用預設彈出視窗，改由 onMapMarkerClick 處理點擊
-      } else {
-        ref.marker.bindPopup(ref.popupHtml);
-      }
-    });
+    renderMapMarkers(); // 重繪以依模式重新綁定 popup(量測模式下 marker 不綁 popup)
     btnToggleMeasureMode.textContent = measureModeActive ? "📏 量測模式：開啟" : "📏 量測模式：關閉";
     btnClearMeasure.style.display = measureModeActive ? "inline-block" : "none";
     if (measureModeActive) {
@@ -1054,20 +1083,189 @@
     }
   }
 
+  // ---------- 編輯模式 ----------
+  function isPointEdited(p) {
+    return !!(p.editHistory && p.editHistory.length > 0);
+  }
+
+  function editedFlagText(p) {
+    var last = p.editHistory[p.editHistory.length - 1];
+    return "已人工修正（最後修正: " + new Date(last.editedAt).toLocaleString() + "）";
+  }
+
+  function setEditMode(active) {
+    if (active && measureModeActive) setMeasureMode(false);
+    editModeActive = active;
+    editSelectedIds = [];
+    renderMapMarkers();
+    btnToggleEditMode.textContent = editModeActive ? "✏️ 編輯模式：開啟" : "✏️ 編輯模式：關閉";
+    btnSelectRecent.style.display = editModeActive ? "inline-block" : "none";
+    if (editModeActive) {
+      measureResultBar.textContent = "編輯模式：點擊登記點選取/取消，拖曳已選取的點可批次移動";
+      measureResultBar.style.display = "block";
+    } else {
+      measureResultBar.textContent = "";
+      measureResultBar.style.display = "none";
+    }
+  }
+
+  // 依 editSelectedIds 套用選取樣式與可拖曳狀態(只有已選取的 marker 可拖曳)
+  function applySelectionVisuals() {
+    mapMarkerRefs.forEach(function (ref) {
+      var selected = editSelectedIds.indexOf(ref.point.id) !== -1;
+      ref.marker.setIcon(selected ? editSelectedIcon : new L.Icon.Default());
+      if (ref.marker.dragging) {
+        if (selected && editModeActive) ref.marker.dragging.enable();
+        else ref.marker.dragging.disable();
+      }
+    });
+  }
+
+  function updateEditStatusBar() {
+    measureResultBar.textContent = editSelectedIds.length > 0
+      ? "編輯模式：已選取 " + editSelectedIds.length + " 筆，拖曳任一選取點可批次移動"
+      : "編輯模式：點擊登記點選取/取消，拖曳已選取的點可批次移動";
+    measureResultBar.style.display = "block";
+  }
+
+  function onEditMarkerClick(point, marker) {
+    if (!editModeActive) return;
+    var idx = editSelectedIds.indexOf(point.id);
+    if (idx === -1) editSelectedIds.push(point.id);
+    else editSelectedIds.splice(idx, 1);
+    applySelectionVisuals();
+    updateEditStatusBar();
+  }
+
+  function selectRecentPoints() {
+    var sorted = loadPoints().slice().sort(function (a, b) {
+      return new Date(b.createdAt) - new Date(a.createdAt);
+    });
+    editSelectedIds = sorted.slice(0, RECENT_SELECT_COUNT).map(function (p) { return p.id; });
+    applySelectionVisuals();
+    measureResultBar.textContent = "編輯模式：已選取最近 " + editSelectedIds.length + " 筆，拖曳任一選取點可批次移動";
+    measureResultBar.style.display = "block";
+  }
+
+  // 拖曳放開 → 確認後才寫入 localStorage；取消則從 localStorage 重繪，所有 marker 彈回原位
+  function onEditMarkerDragEnd(point, marker) {
+    if (!editModeActive || editSelectedIds.indexOf(point.id) === -1) {
+      renderMapMarkers();
+      return;
+    }
+    var target = marker.getLatLng();
+    var points = loadPoints();
+    var selected = points.filter(function (p) { return editSelectedIds.indexOf(p.id) !== -1; });
+    var labelList = selected.map(function (p) { return "・" + p.label; }).join("\n");
+    var ok = window.confirm("確定將 " + selected.length + " 筆記錄移動到此位置？\n\n" + labelList);
+    if (!ok) {
+      renderMapMarkers(); // 未落地，重繪即彈回原位；選取狀態保留(renderMapMarkers 會重新套用)
+      return;
+    }
+    var now = new Date().toISOString();
+    points.forEach(function (p) {
+      if (editSelectedIds.indexOf(p.id) === -1) return;
+      // 舊資料第一次被編輯時，先把當時的 lat/lng 複製進 original 欄位再修改
+      if (p.originalLat == null || p.originalLng == null) {
+        p.originalLat = p.lat;
+        p.originalLng = p.lng;
+      }
+      if (!p.editHistory) p.editHistory = [];
+      p.editHistory.push({ editedAt: now, fromLat: p.lat, fromLng: p.lng, toLat: target.lat, toLng: target.lng });
+      p.lat = target.lat;
+      p.lng = target.lng;
+    });
+    savePoints(points);
+    editSelectedIds = [];
+    renderMapMarkers();
+    measureResultBar.textContent = "編輯模式：已移動 " + selected.length + " 筆記錄";
+    measureResultBar.style.display = "block";
+  }
+
+  // 編輯模式 popup：狀態 + 還原上一步 / 還原 GPS 原始位置(都經確認框才寫入)
+  function buildEditPopupContent(p) {
+    var div = document.createElement("div");
+    var edited = isPointEdited(p);
+    var head = document.createElement("div");
+    head.innerHTML = "<b>" + escapeHtml(p.label) + "</b><br>目前座標: " + p.lat.toFixed(6) + ", " + p.lng.toFixed(6);
+    div.appendChild(head);
+
+    var status = document.createElement("div");
+    status.className = "edit-popup-status" + (edited ? " edited" : "");
+    status.textContent = edited ? editedFlagText(p) : "GPS 原始";
+    div.appendChild(status);
+
+    if (edited) {
+      var actions = document.createElement("div");
+      actions.className = "edit-popup-actions";
+
+      var undoBtn = document.createElement("button");
+      undoBtn.textContent = "↩️ 還原上一步";
+      undoBtn.addEventListener("click", function () {
+        if (!window.confirm("確定還原「" + p.label + "」上一步修正？")) return;
+        var points = loadPoints();
+        points.forEach(function (x) {
+          if (x.id !== p.id || !x.editHistory || x.editHistory.length === 0) return;
+          var h = x.editHistory.pop();
+          x.lat = h.fromLat;
+          x.lng = h.fromLng;
+        });
+        savePoints(points);
+        leafletMap.closePopup();
+        renderMapMarkers();
+      });
+      actions.appendChild(undoBtn);
+
+      if (p.originalLat != null && p.originalLng != null) {
+        var restoreBtn = document.createElement("button");
+        restoreBtn.textContent = "📡 還原 GPS 原始位置";
+        restoreBtn.addEventListener("click", function () {
+          if (!window.confirm("確定將「" + p.label + "」還原到 GPS 原始位置？此動作會清空編輯歷史。")) return;
+          var points = loadPoints();
+          points.forEach(function (x) {
+            if (x.id !== p.id) return;
+            x.lat = x.originalLat;
+            x.lng = x.originalLng;
+            x.editHistory = [];
+          });
+          savePoints(points);
+          leafletMap.closePopup();
+          renderMapMarkers();
+        });
+        actions.appendChild(restoreBtn);
+      }
+      div.appendChild(actions);
+    }
+    return div;
+  }
+
+  function buildNormalPopupHtml(p) {
+    var gmapsUrl = "https://www.google.com/maps/search/?api=1&query=" + p.lat + "," + p.lng;
+    return "<b>" + escapeHtml(p.label) + "</b><br>" +
+      (isPointEdited(p) ? "<span class='popup-edited-flag'>⚠️ " + editedFlagText(p) + "</span><br>" : "") +
+      "登記時間: " + new Date(p.createdAt).toLocaleString() + "<br>" +
+      "登記時精度: ±" + (p.accuracy != null ? p.accuracy.toFixed(1) : "?") + "m<br>" +
+      "<a href='" + gmapsUrl + "' target='_blank' rel='noopener noreferrer'>在 Google 地圖開啟</a>";
+  }
+
   function renderMapMarkers() {
     mapMarkersLayer.clearLayers();
     mapMarkerRefs = [];
     loadPoints().forEach(function (p) {
-      var gmapsUrl = "https://www.google.com/maps/search/?api=1&query=" + p.lat + "," + p.lng;
-      var popupHtml = "<b>" + escapeHtml(p.label) + "</b><br>" +
-        "登記時間: " + new Date(p.createdAt).toLocaleString() + "<br>" +
-        "登記時精度: ±" + (p.accuracy != null ? p.accuracy.toFixed(1) : "?") + "m<br>" +
-        "<a href='" + gmapsUrl + "' target='_blank' rel='noopener noreferrer'>在 Google 地圖開啟</a>";
       var marker = L.marker([p.lat, p.lng]).addTo(mapMarkersLayer);
-      if (!measureModeActive) marker.bindPopup(popupHtml);
-      marker.on("click", function () { onMapMarkerClick(p, marker); });
-      mapMarkerRefs.push({ point: p, marker: marker, popupHtml: popupHtml });
+      if (editModeActive) {
+        marker.bindPopup(buildEditPopupContent(p));
+      } else if (!measureModeActive) {
+        marker.bindPopup(buildNormalPopupHtml(p));
+      }
+      marker.on("click", function () {
+        if (measureModeActive) onMapMarkerClick(p, marker);
+        else if (editModeActive) onEditMarkerClick(p, marker);
+      });
+      marker.on("dragend", function () { onEditMarkerDragEnd(p, marker); });
+      mapMarkerRefs.push({ point: p, marker: marker });
     });
+    if (editModeActive) applySelectionVisuals();
   }
 
   // 需求3: 涵蓋所有登記點 + 目前位置(若有)；沒有登記點就以目前位置為中心；都沒有就用預設中心點。
@@ -1118,7 +1316,7 @@
   function enterMapTab() {
     initMapIfNeeded();
 
-    // 每次重新進入頁籤都還原成未量測狀態：markers 即將被 renderMapMarkers() 整組換新，
+    // 每次重新進入頁籤都還原成未量測/未編輯狀態：markers 即將被 renderMapMarkers() 整組換新，
     // 舊的量測連線/選取樣式參照的是即將銷毀的 marker 物件，直接重置狀態避免殘留。
     measureModeActive = false;
     measureFirstPoint = null;
@@ -1129,6 +1327,10 @@
     }
     btnToggleMeasureMode.textContent = "📏 量測模式：關閉";
     btnClearMeasure.style.display = "none";
+    editModeActive = false;
+    editSelectedIds = [];
+    btnToggleEditMode.textContent = "✏️ 編輯模式：關閉";
+    btnSelectRecent.style.display = "none";
     measureResultBar.textContent = "";
     measureResultBar.style.display = "none";
 
@@ -1154,6 +1356,9 @@
       measureResultBar.style.display = "block";
     }
   });
+  btnToggleEditMode.addEventListener("click", function () { setEditMode(!editModeActive); });
+  btnSelectRecent.addEventListener("click", selectRecentPoints);
+  btnSelectRecent.textContent = "🕐 選取最近 " + RECENT_SELECT_COUNT + " 筆";
 
 })();
 </script>
