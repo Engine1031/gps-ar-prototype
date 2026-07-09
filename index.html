@@ -50,6 +50,11 @@
   .delete-btn:disabled { opacity: 0.4; }
   #emptyHint { color: #777; font-size: 14px; padding: 20px 0; text-align: center; }
   .sampling-badge { color: #ff0; font-weight: bold; }
+  #storageUsage { color: #888; font-size: 12px; font-family: monospace; margin-bottom: 10px; }
+  .point-thumb {
+    display: block; margin-top: 6px; width: 56px; height: 56px;
+    object-fit: cover; border-radius: 6px; border: 1px solid #444;
+  }
 
   /* ---------- 標籤輸入 modal(與定位採樣解耦) ---------- */
   .modal-overlay {
@@ -65,22 +70,66 @@
     border: 2px solid #666; border-radius: 10px; margin-bottom: 14px;
   }
   .modal-actions { display: flex; gap: 10px; }
-  .modal-actions button { flex: 1; margin-bottom: 0; }
-  .modal-actions button:disabled { opacity: 0.4; }
+  .modal-actions button {
+    flex: 1; margin-bottom: 0; padding: 14px; font-size: 17px; font-weight: bold;
+    border-radius: 10px; border: 2px solid #666; background: #333; color: #fff; cursor: pointer;
+  }
+  /* 不可按時: 灰底灰字，文字仍清楚可見(絕不空白) */
+  .modal-actions button:disabled { background: #222; color: #888; border-color: #444; cursor: not-allowed; opacity: 1; }
+  #labelModalConfirm:not(:disabled) { background: #0f8; color: #000; border-color: #0f8; }
+
+  /* ---------- 拍照(選填) ---------- */
+  .modal-photo-row { margin-bottom: 14px; }
+  #labelModalPhotoBtn {
+    width: 100%; padding: 12px; font-size: 16px; font-weight: bold;
+    background: #234; color: #fff; border: 2px solid #567; border-radius: 10px; cursor: pointer;
+  }
+  #labelModalPhotoBtn:disabled { opacity: 0.5; cursor: wait; }
+  .modal-photo-preview { display: flex; align-items: center; gap: 12px; }
+  .modal-photo-preview img { width: 72px; height: 72px; object-fit: cover; border-radius: 8px; border: 1px solid #666; }
+  #labelModalPhotoRemove {
+    padding: 8px 12px; font-size: 14px; font-weight: bold;
+    background: #a00; color: #fff; border: none; border-radius: 8px; cursor: pointer;
+  }
 
   /* ---------- View / AR mode ---------- */
   #viewScreen { background: #000; }
   #camera {
     position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; background: #000;
   }
+  /* 圖層本身不吃點擊(讓相機/空白處穿透)，只有標籤元素開啟 pointer-events 供點擊看詳情 */
   #overlayLayer { position: absolute; inset: 0; pointer-events: none; }
   .marker {
     position: absolute; top: 42%; transform: translate(-50%, -50%);
     background: rgba(0, 40, 20, 0.75); border: 2px solid #0f8; border-radius: 10px;
     padding: 6px 10px; color: #fff; font-size: 14px; font-weight: bold;
     white-space: nowrap; text-align: center; display: none;
+    pointer-events: auto; cursor: pointer;
   }
   .marker .marker-dist { display: block; font-size: 12px; font-weight: normal; color: #9f9; }
+
+  /* ---------- AR 標籤詳情卡片 ---------- */
+  #arDetailCard {
+    position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+    z-index: 30; width: 88%; max-width: 340px; max-height: 80vh; overflow-y: auto;
+    background: rgba(10, 20, 15, 0.96); border: 2px solid #0f8; border-radius: 14px;
+    padding: 16px; display: none;
+  }
+  #arDetailCard.active { display: block; }
+  #arDetailClose {
+    width: 100%; padding: 12px; margin-bottom: 12px; font-size: 16px; font-weight: bold;
+    background: #333; color: #fff; border: 1px solid #666; border-radius: 8px; cursor: pointer;
+  }
+  #arDetailBody h3 { margin: 0 0 10px; font-size: 20px; color: #0f8; }
+  .ar-detail-row {
+    display: flex; justify-content: space-between; gap: 10px;
+    padding: 6px 0; border-bottom: 1px solid #234; font-size: 14px;
+  }
+  .ar-detail-row span { color: #9c9; flex: 0 0 auto; }
+  .ar-detail-row b { color: #fff; text-align: right; word-break: break-all; }
+  .ar-detail-photo {
+    display: block; width: 100%; margin-top: 12px; border-radius: 8px; border: 1px solid #444;
+  }
 
   #viewTopBar {
     position: absolute; top: 0; left: 0; right: 0; z-index: 5;
@@ -182,6 +231,7 @@
   <div id="registerScreen" class="screen active">
     <button id="btnRegister" class="big-btn">📍 取得目前位置並登記地標</button>
     <div id="registerStatus"></div>
+    <div id="storageUsage"></div>
     <ul id="pointList"></ul>
     <div id="emptyHint">尚未登記任何地標</div>
 
@@ -190,9 +240,17 @@
         <div id="labelModalCoords" class="modal-coords">GPS 定位中，可以直接輸入標籤，不用等定位完成</div>
         <div id="labelModalProgress" class="modal-progress"></div>
         <input id="labelModalInput" type="text" class="modal-input" placeholder="請輸入這個地標的名稱">
+        <div class="modal-photo-row">
+          <input id="labelModalPhotoInput" type="file" accept="image/*" capture="environment" style="display:none">
+          <button type="button" id="labelModalPhotoBtn">📷 拍照（選填）</button>
+          <div id="labelModalPhotoPreview" class="modal-photo-preview" style="display:none">
+            <img id="labelModalPhotoThumb" alt="照片預覽">
+            <button type="button" id="labelModalPhotoRemove">移除照片</button>
+          </div>
+        </div>
         <div class="modal-actions">
           <button id="labelModalCancel">取消</button>
-          <button id="labelModalConfirm" disabled>確認</button>
+          <button id="labelModalConfirm" disabled>請輸入名稱</button>
         </div>
       </div>
     </div>
@@ -209,6 +267,11 @@
     <video id="camera" autoplay playsinline muted></video>
     <div id="overlayLayer"></div>
     <div id="orientationWarning">⚠️ 非絕對方位資料，方向可能不準確</div>
+
+    <div id="arDetailCard">
+      <button id="arDetailClose">✕ 關閉</button>
+      <div id="arDetailBody"></div>
+    </div>
 
     <div id="viewTopBar">
       <button id="btnBack">← 回登記模式</button>
@@ -245,7 +308,7 @@
   "use strict";
 
   var STORAGE_KEY = "gpsArPoints_v1";
-  var APP_VERSION = "1.7.0"; // 每次改版記得同步更新
+  var APP_VERSION = "1.8.0"; // 每次改版記得同步更新
 
   // ---- 可調參數 ----
   var AR_RENDER_THROTTLE_MS = 150;             // 修正1: updateAR() 畫面重繪節流間隔(ms)
@@ -258,6 +321,8 @@
   var MAP_MAX_ZOOM = 19;              // 調整1: OpenStreetMap 標準圖磚可用的最大 zoom
   var MAP_TILE_ERROR_THRESHOLD = 3;   // 調整1: 同一 zoom 等級累積這麼多次圖磚載入失敗，就自動退回上一級
   var RECENT_SELECT_COUNT = 5;        // 編輯模式: 「選取最近 N 筆」一鍵選取的數量
+  var PHOTO_MAX_EDGE = 800;           // 調整2: 拍照壓縮 —— 長邊縮到此像素
+  var PHOTO_JPEG_QUALITY = 0.6;       // 調整2: 拍照壓縮 —— JPEG 輸出品質
 
   document.getElementById("appVersion").textContent = "v" + APP_VERSION;
 
@@ -270,6 +335,29 @@
   }
   function savePoints(points) {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(points));
+  }
+  function isQuotaError(e) {
+    return !!e && (e.name === "QuotaExceededError" || e.name === "NS_ERROR_DOM_QUOTA_REACHED" ||
+      e.code === 22 || e.code === 1014);
+  }
+  // 調整2: localStorage 容量保護 —— 若寫入失敗(空間已滿)且該筆帶照片，
+  // 自動移除照片再存一次，不讓整筆登記失敗。回傳是否成功存檔。
+  function savePointsWithQuotaGuard(points, pointBeingAdded) {
+    try {
+      savePoints(points);
+      return true;
+    } catch (e) {
+      if (isQuotaError(e) && pointBeingAdded && pointBeingAdded.photo) {
+        delete pointBeingAdded.photo;
+        try {
+          savePoints(points);
+          window.alert("儲存空間已滿，此筆將不含照片儲存。");
+          return true;
+        } catch (e2) { /* 連無照片版本都存不下，落到下方 */ }
+      }
+      window.alert("儲存空間已滿，無法儲存這筆登記，請先刪除部分資料再試。");
+      return false;
+    }
   }
   function toRad(d) { return d * Math.PI / 180; }
   function toDeg(r) { return r * 180 / Math.PI; }
@@ -344,6 +432,31 @@
   var labelModalInput = document.getElementById("labelModalInput");
   var labelModalConfirm = document.getElementById("labelModalConfirm");
   var labelModalCancel = document.getElementById("labelModalCancel");
+  var labelModalPhotoInput = document.getElementById("labelModalPhotoInput");
+  var labelModalPhotoBtn = document.getElementById("labelModalPhotoBtn");
+  var labelModalPhotoPreview = document.getElementById("labelModalPhotoPreview");
+  var labelModalPhotoThumb = document.getElementById("labelModalPhotoThumb");
+  var labelModalPhotoRemove = document.getElementById("labelModalPhotoRemove");
+  var storageUsage = document.getElementById("storageUsage");
+
+  // 調整2: 顯示 localStorage 已用容量估計(字元數≈位元組數，照片 base64 為 ASCII 佔大宗)
+  function updateStorageUsage() {
+    var raw = localStorage.getItem(STORAGE_KEY) || "";
+    var bytes = raw.length;
+    var text;
+    if (bytes < 1024) text = bytes + " B";
+    else if (bytes < 1024 * 1024) text = (bytes / 1024).toFixed(1) + " KB";
+    else text = (bytes / 1024 / 1024).toFixed(2) + " MB";
+    storageUsage.textContent = "已用儲存空間估計：" + text;
+  }
+
+  // 調整1: 確認按鈕在任何狀態下文字都清楚可見，不會出現空白按鈕。
+  function updateLabelModalButtons() {
+    var hasLabel = labelModalInput.value.trim().length > 0;
+    labelModalConfirm.disabled = !hasLabel;
+    labelModalConfirm.textContent = hasLabel ? "確認" : "請輸入名稱";
+    labelModalCancel.textContent = "取消";
+  }
 
   // 調整2: 取樣與輸入標籤解耦後，「這一筆正在登記中的記錄」用這個變數代表，
   // 直到標籤已確認(labelConfirmed) 且背景取樣已完成(samplingDone) 兩者都成立，
@@ -377,7 +490,8 @@
           p.lat.toFixed(6) + ", " + p.lng.toFixed(6) +
           " (±" + (p.accuracy != null ? p.accuracy.toFixed(1) : "?") + "m" +
           (p.sampleCount != null ? "，" + p.sampleCount + " 筆取樣" : "") + ")<br>" +
-          "<span class='point-meta'>" + new Date(p.createdAt).toLocaleString() + "</span>";
+          "<span class='point-meta'>" + new Date(p.createdAt).toLocaleString() + "</span>" +
+          (p.photo ? "<img class='point-thumb' src='" + p.photo + "' alt='照片'>" : "");
       }
       var delBtn = document.createElement("button");
       delBtn.className = "delete-btn";
@@ -395,6 +509,7 @@
       li.appendChild(delBtn);
       pointList.appendChild(li);
     });
+    updateStorageUsage();
   }
 
   function escapeHtml(s) {
@@ -449,9 +564,19 @@
     samplingState.active = false;
   }
 
+  function resetPhotoUi() {
+    labelModalPhotoThumb.src = "";
+    labelModalPhotoPreview.style.display = "none";
+    labelModalPhotoBtn.style.display = "block";
+    labelModalPhotoBtn.disabled = false;
+    labelModalPhotoBtn.textContent = "📷 拍照（選填）";
+    labelModalPhotoInput.value = "";
+  }
+
   function openLabelModal() {
     labelModalInput.value = "";
-    labelModalConfirm.disabled = true;
+    updateLabelModalButtons();
+    resetPhotoUi();
     labelModalProgress.textContent = "取樣中... 已收集 0 筆，等待第一筆 GPS 讀數...";
     labelModalOverlay.classList.add("active");
     labelModalInput.focus();
@@ -459,6 +584,30 @@
 
   function closeLabelModal() {
     labelModalOverlay.classList.remove("active");
+  }
+
+  // 調整2: 用 canvas 壓縮 —— 長邊縮到 PHOTO_MAX_EDGE、輸出 JPEG(品質 PHOTO_JPEG_QUALITY)，回傳 dataURL
+  function compressImageFile(file) {
+    return new Promise(function (resolve, reject) {
+      var reader = new FileReader();
+      reader.onload = function () {
+        var img = new Image();
+        img.onload = function () {
+          var scale = Math.min(1, PHOTO_MAX_EDGE / Math.max(img.width, img.height));
+          var w = Math.max(1, Math.round(img.width * scale));
+          var h = Math.max(1, Math.round(img.height * scale));
+          var canvas = document.createElement("canvas");
+          canvas.width = w;
+          canvas.height = h;
+          canvas.getContext("2d").drawImage(img, 0, 0, w, h);
+          resolve(canvas.toDataURL("image/jpeg", PHOTO_JPEG_QUALITY));
+        };
+        img.onerror = function () { reject(new Error("圖片載入失敗")); };
+        img.src = reader.result;
+      };
+      reader.onerror = function () { reject(new Error("檔案讀取失敗")); };
+      reader.readAsDataURL(file);
+    });
   }
 
   // 調整2: 標籤確認與背景取樣完成，兩件事誰先誰後都要能正確運作 ——
@@ -474,10 +623,16 @@
       accuracy: result.accuracy, sampleCount: result.sampleCount,
       createdAt: pendingRegistration.createdAt, status: "done"
     };
+    if (pendingRegistration.photo) point.photo = pendingRegistration.photo; // 沒拍照就不存此欄位(向下相容)
     var points = loadPoints();
     points.push(point);
-    savePoints(points);
-    registerStatus.textContent = "已登記：" + point.label + "（±" + result.accuracy.toFixed(1) + "m，" + result.sampleCount + " 筆取樣）";
+    var saved = savePointsWithQuotaGuard(points, point); // 空間滿時會自動改存無照片版本
+    if (saved) {
+      registerStatus.textContent = "已登記：" + point.label + (point.photo ? "（含照片）" : "") +
+        "（±" + result.accuracy.toFixed(1) + "m，" + result.sampleCount + " 筆取樣）";
+    } else {
+      registerStatus.textContent = "儲存失敗，未能登記：" + point.label;
+    }
     pendingRegistration = null;
     setRegisterButtonSampling(false);
     renderPointList();
@@ -577,11 +732,36 @@
     // 最終由 SAMPLE_DURATION_MS 逾時機制(handleSamplingDone)兜底處理。
   }
 
-  labelModalInput.addEventListener("input", function () {
-    labelModalConfirm.disabled = labelModalInput.value.trim().length === 0;
-  });
+  labelModalInput.addEventListener("input", updateLabelModalButtons);
   labelModalInput.addEventListener("keydown", function (e) {
     if (e.key === "Enter" && !labelModalConfirm.disabled) labelModalConfirm.click();
+  });
+
+  // 調整2: 拍照(選填) —— 觸發相機 → 壓縮 → 縮圖預覽；完全不影響不拍照的流程
+  labelModalPhotoBtn.addEventListener("click", function () { labelModalPhotoInput.click(); });
+  labelModalPhotoInput.addEventListener("change", function () {
+    var file = labelModalPhotoInput.files && labelModalPhotoInput.files[0];
+    if (!file || !pendingRegistration) return;
+    labelModalPhotoBtn.textContent = "📷 壓縮中...";
+    labelModalPhotoBtn.disabled = true;
+    compressImageFile(file).then(function (dataUrl) {
+      if (!pendingRegistration) return; // 壓縮期間若已取消，丟棄結果
+      pendingRegistration.photo = dataUrl;
+      labelModalPhotoThumb.src = dataUrl;
+      labelModalPhotoPreview.style.display = "flex";
+      labelModalPhotoBtn.style.display = "none";
+      labelModalPhotoBtn.disabled = false;
+      labelModalPhotoBtn.textContent = "📷 拍照（選填）";
+    }).catch(function (err) {
+      labelModalPhotoBtn.disabled = false;
+      labelModalPhotoBtn.textContent = "📷 拍照（選填）";
+      window.alert("照片處理失敗：" + err.message);
+    });
+    labelModalPhotoInput.value = ""; // 允許重拍同一張檔案
+  });
+  labelModalPhotoRemove.addEventListener("click", function () {
+    if (pendingRegistration) delete pendingRegistration.photo;
+    resetPhotoUi();
   });
 
   labelModalConfirm.addEventListener("click", function () {
@@ -639,6 +819,9 @@
   var diagnostics = document.getElementById("diagnostics");
   var orientationWarning = document.getElementById("orientationWarning");
   var fovInput = document.getElementById("fovInput");
+  var arDetailCard = document.getElementById("arDetailCard");
+  var arDetailClose = document.getElementById("arDetailClose");
+  var arDetailBody = document.getElementById("arDetailBody");
 
   var viewState = {
     stream: null,
@@ -656,8 +839,33 @@
     gotAbsolute: false,
     gotIosCompass: false,
     markerEls: {},
-    orientationHandlersAttached: false
+    orientationHandlersAttached: false,
+    openDetailPointId: null // 調整3: 目前打開詳情卡片的登記點 id(null 表示未開)
   };
+
+  // 調整3: 點擊 AR 標籤打開詳情卡片。距離在 updateAR() 每幀更新(見 #arDetailDist)，
+  // 其餘欄位為打開當下的快照；卡片保留直列式排版供之後擴充。
+  function openArDetail(pointId) {
+    var p = loadPoints().filter(function (x) { return x.id === pointId; })[0];
+    if (!p) return;
+    viewState.openDetailPointId = pointId;
+    var rows = [];
+    rows.push("<h3>" + escapeHtml(p.label) + "</h3>");
+    rows.push("<div class='ar-detail-row'><span>目前距離</span><b id='arDetailDist'>計算中...</b></div>");
+    rows.push("<div class='ar-detail-row'><span>登記時間</span><b>" + escapeHtml(new Date(p.createdAt).toLocaleString()) + "</b></div>");
+    rows.push("<div class='ar-detail-row'><span>登記時精度</span><b>±" + (p.accuracy != null ? p.accuracy.toFixed(1) : "?") + " m</b></div>");
+    rows.push("<div class='ar-detail-row'><span>取樣筆數</span><b>" + (p.sampleCount != null ? p.sampleCount : "?") + "</b></div>");
+    rows.push("<div class='ar-detail-row'><span>人工修正</span><b>" + (isPointEdited(p) ? escapeHtml(editedFlagText(p)) : "未修正") + "</b></div>");
+    if (p.photo) rows.push("<img class='ar-detail-photo' src='" + p.photo + "' alt='現場照片'>");
+    arDetailBody.innerHTML = rows.join("");
+    arDetailCard.classList.add("active");
+  }
+
+  function closeArDetail() {
+    arDetailCard.classList.remove("active");
+    viewState.openDetailPointId = null;
+  }
+  arDetailClose.addEventListener("click", closeArDetail);
 
   // 修正2: 收到新的原始羅盤讀數時，先做圓周平滑再寫入 currentHeading。
   // 來源切換(例如從 fallback 換成絕對方位)時清空緩衝區，避免不同來源的角度混在一起平均。
@@ -791,6 +999,11 @@
     if (!el) {
       el = document.createElement("div");
       el.className = "marker";
+      el.dataset.pointId = point.id;
+      // 調整3: 點擊標籤看詳情。因標籤重疊時會垂直錯開成不重疊，點擊命中的就是螢幕上那一個。
+      el.addEventListener("click", function () {
+        if (el.dataset.pointId) openArDetail(el.dataset.pointId);
+      });
       overlayLayer.appendChild(el);
       viewState.markerEls[point.id] = el;
     }
@@ -861,19 +1074,21 @@
       });
     });
 
-    // 修正3：標籤重疊碰撞避讓 —— 依水平位置排序，相鄰太近的標籤交錯垂直錯開
+    // 修正3：標籤重疊碰撞避讓 —— 依水平位置排序，同一水平叢集內的標籤逐級往下錯開。
+    // 用「累加階層」而非二值交錯：3 個以上幾乎同位的標籤會排成 0/60/120px 而非 0/60/0，
+    // 確保沒有兩個水平重疊的標籤落在同一列，點擊時才能穩定命中畫面上看到的那一個(調整3)。
     var visible = entries.filter(function (e) { return e.inView; });
     visible.sort(function (a, b) { return a.xPercent - b.xPercent; });
     var prevX = null;
-    var prevOffset = 0;
+    var stackLevel = 0;
     visible.forEach(function (entry) {
       if (prevX !== null && Math.abs(entry.xPercent - prevX) < LABEL_COLLISION_THRESHOLD_PERCENT) {
-        entry.verticalOffset = (prevOffset === 0) ? LABEL_COLLISION_OFFSET_PX : 0;
+        stackLevel += 1;
       } else {
-        entry.verticalOffset = 0;
+        stackLevel = 0;
       }
+      entry.verticalOffset = stackLevel * LABEL_COLLISION_OFFSET_PX;
       prevX = entry.xPercent;
-      prevOffset = entry.verticalOffset;
     });
 
     // 第二階段：套用到固定的 DOM 節點（每個登記點只有一個節點，重複使用，只改 style/文字）
@@ -893,6 +1108,15 @@
       );
     });
     cleanupMarkerEls(validIds);
+
+    // 調整3: 詳情卡片打開期間，背景標籤持續更新，卡片上的「目前距離」也一起即時更新
+    if (viewState.openDetailPointId != null) {
+      var distEl = document.getElementById("arDetailDist");
+      if (distEl) {
+        var match = entries.filter(function (e) { return e.p.id === viewState.openDetailPointId; })[0];
+        distEl.textContent = (match && viewState.currentPosition) ? match.dist.toFixed(1) + " m" : "無法計算";
+      }
+    }
 
     diagnostics.innerHTML = diagLines.map(escapeHtml).join("\n");
   }
@@ -952,6 +1176,7 @@
       overlayLayer.removeChild(viewState.markerEls[id]);
     });
     viewState.markerEls = {};
+    closeArDetail(); // 調整3: 離開檢視模式時關閉詳情卡片
     startOverlay.style.display = "flex";
     diagnostics.textContent = "初始化中...";
   }
