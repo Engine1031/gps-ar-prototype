@@ -255,37 +255,36 @@
   }
   .popup-edited-flag { color: #c60; font-weight: bold; font-size: 12px; }
 
-  /* ---------- 主點/子點(調整4 v2) ---------- */
-  #btnToggleCluster { }
-  /* 地圖 marker 樣式區分：子點橘色圓、父點金色星框 */
-  .child-marker-inner {
-    width: 20px; height: 20px; border-radius: 50%;
-    background: #ff8c1a; border: 2px solid #fff; box-shadow: 0 0 6px rgba(255,140,26,0.9);
-  }
-  .parent-marker-inner {
-    width: 22px; height: 22px; border-radius: 50%;
-    background: #1a73e8; border: 3px solid #ffd23f; box-shadow: 0 0 8px rgba(255,210,63,0.9);
-    display: flex; align-items: center; justify-content: center; font-size: 12px;
-  }
-  .parent-marker-inner::after { content: "★"; color: #ffd23f; }
-  /* 子點列表徽章 */
+  /* ---------- 貨物記錄 / 列表(v3) ---------- */
   .point-badge { font-size: 12px; font-weight: bold; padding: 1px 6px; border-radius: 6px; margin-left: 6px; }
-  .point-badge.child { background: #6a3500; color: #ffcc99; }
-  .point-badge.parent { background: #3a3200; color: #ffe680; }
+  .point-badge.cargo { background: #5a3a00; color: #ffcf80; }
   .point-actions { display: flex; flex-direction: column; gap: 6px; flex: 0 0 auto; }
-  .anchor-btn {
-    background: #245; color: #fff; border: 1px solid #567; border-radius: 8px;
-    padding: 8px 10px; font-size: 13px; font-weight: bold; cursor: pointer;
+  /* 有在場貨物的地圖 marker: 藍底 + 📦 徽章 */
+  .cargo-marker-inner {
+    position: relative; width: 26px; height: 26px; border-radius: 50%;
+    background: #1a73e8; border: 2px solid #fff; box-shadow: 0 0 6px rgba(26,115,232,0.9);
+    display: flex; align-items: center; justify-content: center; font-size: 14px;
   }
-  #parentPickerList { max-height: 40vh; overflow-y: auto; margin-bottom: 12px; }
-  #parentPickerList button {
-    display: block; width: 100%; box-sizing: border-box; min-height: var(--min-touch, 50px);
-    text-align: left; padding: 10px 12px; margin-bottom: 6px; font-size: 15px; font-weight: bold;
-    background: #1a2333; color: #fff; border: 1px solid #456; border-radius: 8px; cursor: pointer;
+  .cargo-marker-inner::after { content: "📦"; }
+  .cargo-marker-inner .cargo-count {
+    position: absolute; top: -7px; right: -7px; min-width: 16px; height: 16px; line-height: 16px;
+    background: #d33; color: #fff; font-size: 10px; font-weight: bold; text-align: center; border-radius: 8px; padding: 0 3px;
   }
-  #parentPickerList .picker-empty { color: #999; font-size: 14px; padding: 12px 0; }
+  /* popup / AR 詳情內的貨物區塊 */
+  .cargo-section { margin-top: 10px; border-top: 1px solid #345; padding-top: 8px; }
+  .cargo-section h4 { margin: 0 0 6px; font-size: 14px; color: #ffcf80; }
+  .cargo-item { border: 1px solid #456; border-radius: 8px; padding: 6px 8px; margin-bottom: 6px; font-size: 13px; }
+  .cargo-item .cargo-item-name { font-weight: bold; }
+  .cargo-item .cargo-item-meta { color: #9ab; font-size: 12px; }
+  .cargo-item img.cargo-thumb { display: block; margin-top: 4px; width: 48px; height: 48px; object-fit: cover; border-radius: 6px; border: 1px solid #456; }
+  .cargo-ship-btn { margin-top: 4px; background: #642; color: #fff; border: 1px solid #a63; border-radius: 6px; padding: 6px 10px; font-size: 12px; font-weight: bold; cursor: pointer; }
+  .cargo-add-btn { width: 100%; background: #253; color: #cfc; border: 1px solid #486; border-radius: 8px; padding: 8px; font-size: 13px; font-weight: bold; cursor: pointer; }
+  .cargo-empty { color: #789; font-size: 12px; margin-bottom: 6px; }
+  .cargo-field-label { display: block; color: #9ab; font-size: 12px; margin: 2px 0; }
+  .cluster-list-item { font-size: 13px; padding: 4px 0; border-bottom: 1px solid #345; }
+  .cluster-list-item .cluster-cargo { color: #ffcf80; font-size: 12px; }
 
-  /* 8 方向偏移調整面板(調整4 v2) */
+  /* 8 方向位置微調面板(v3: 適用所有點) */
   #offsetPanel {
     position: absolute; left: 8px; bottom: 8px; z-index: 600; display: none;
     background: rgba(0,0,0,0.85); border: 1px solid #567; border-radius: 12px; padding: 12px; width: 240px;
@@ -432,18 +431,33 @@
       <div id="offsetPad"></div>
       <button id="offsetPanelClose">關閉調整面板</button>
     </div>
-
-    <div id="parentPickerOverlay" class="modal-overlay">
-      <div class="modal-box">
-        <div class="modal-coords">選擇要掛在哪個主點底下</div>
-        <div id="parentPickerList"></div>
-        <div class="modal-actions">
-          <button id="parentPickerCancel">取消</button>
-        </div>
-      </div>
-    </div>
   </div>
 
+</div>
+
+<!-- 貨物記錄新增輸入框(地圖 popup / AR 詳情共用) -->
+<div id="cargoModalOverlay" class="modal-overlay">
+  <div class="modal-box">
+    <div class="modal-coords">新增貨物記錄</div>
+    <input id="cargoName" type="text" class="modal-input" placeholder="名稱／批次（必填）">
+    <input id="cargoQty" type="number" class="modal-input" placeholder="數量（選填）">
+    <input id="cargoUnit" type="text" class="modal-input" placeholder="單位（選填，例：支／噸）">
+    <label class="cargo-field-label">進場時間</label>
+    <input id="cargoArrived" type="datetime-local" class="modal-input">
+    <input id="cargoNote" type="text" class="modal-input" placeholder="備註（選填）">
+    <div class="modal-photo-row">
+      <input id="cargoPhotoInput" type="file" accept="image/*" capture="environment" style="display:none">
+      <button type="button" id="cargoPhotoBtn">📷 拍照（選填）</button>
+      <div id="cargoPhotoPreview" class="modal-photo-preview" style="display:none">
+        <img id="cargoPhotoThumb" alt="照片預覽">
+        <button type="button" id="cargoPhotoRemove">移除照片</button>
+      </div>
+    </div>
+    <div class="modal-actions">
+      <button id="cargoModalCancel">取消</button>
+      <button id="cargoModalConfirm" disabled>請輸入名稱</button>
+    </div>
+  </div>
 </div>
 
 <div id="appVersion"></div>
@@ -455,7 +469,7 @@
   "use strict";
 
   var STORAGE_KEY = "gpsArPoints_v1";
-  var APP_VERSION = "2.0.0"; // 每次改版記得同步更新
+  var APP_VERSION = "2.1.0"; // 每次改版記得同步更新
 
   // ---- 可調參數 ----
   var AR_RENDER_THROTTLE_MS = 150;             // 修正1: updateAR() 畫面重繪節流間隔(ms)
@@ -554,54 +568,21 @@
     return (meanDeg + 360) % 360;
   }
 
-  // ===================== 主點/子點 helpers(調整4 v2) =====================
+  // ===================== 共用 helpers =====================
   function byId(points, id) {
     for (var i = 0; i < points.length; i++) if (points[i].id === id) return points[i];
     return null;
   }
-  function isChild(p) { return p && p.parentId != null; }
-  function childrenOf(points, parentId) {
-    return points.filter(function (x) { return x.parentId === parentId; });
+  // v3: 貨物記錄 —— parentId/offsetEast/offsetNorth 欄位保留於資料定義中(向下相容)，新資料不再使用。
+  function activeCargo(p) {
+    return (p && p.cargoRecords ? p.cargoRecords : []).filter(function (r) { return r.status === "active"; });
   }
-  function hasChildren(points, id) {
-    return points.some(function (x) { return x.parentId === id; });
-  }
-  // 換算子點絕對座標(小範圍近似，與 haversine 精神一致)
-  function computeChildLatLng(parentLat, parentLng, offsetEast, offsetNorth) {
-    return {
-      lat: parentLat + offsetNorth / 111320,
-      lng: parentLng + offsetEast / (111320 * Math.cos(toRad(parentLat)))
-    };
-  }
-  // 父點座標改變後，重算其所有子點的絕對座標(offset 不變，整體平移)
-  function recomputeChildrenLatLng(points, parentId) {
-    var parent = byId(points, parentId);
-    if (!parent) return;
-    points.forEach(function (c) {
-      if (c.parentId !== parentId) return;
-      var ll = computeChildLatLng(parent.lat, parent.lng, c.offsetEast || 0, c.offsetNorth || 0);
-      c.lat = ll.lat;
-      c.lng = ll.lng;
-    });
-  }
-  // 一批點被移動後(拖曳合併)，維持父子關係一致：父點→子點跟著平移；子點→依新座標回推 offset
-  function reconcileAfterMove(points, movedIds) {
-    movedIds.forEach(function (id) {
-      var p = byId(points, id);
-      if (p && !isChild(p)) recomputeChildrenLatLng(points, id);
-    });
-    movedIds.forEach(function (id) {
-      var c = byId(points, id);
-      if (c && isChild(c)) {
-        var parent = byId(points, c.parentId);
-        if (parent) {
-          var d = haversineDistance(parent.lat, parent.lng, c.lat, c.lng);
-          var b = bearingTo(parent.lat, parent.lng, c.lat, c.lng);
-          c.offsetEast = d * Math.sin(toRad(b));
-          c.offsetNorth = d * Math.cos(toRad(b));
-        }
-      }
-    });
+  function hasActiveCargo(p) { return activeCargo(p).length > 0; }
+  // 聚合清單用的一句話摘要
+  function cargoSummary(p) {
+    var act = activeCargo(p);
+    if (act.length === 0) return "無在場貨物";
+    return act.length + " 筆在場 · " + act[0].name + (act.length > 1 ? " 等" : "");
   }
 
   // ===================== Tabs =====================
@@ -617,8 +598,9 @@
     Object.keys(screens).forEach(function (k) { screens[k].classList.toggle("active", k === name); });
     if (name !== "view") stopViewMode();
     if (name === "map") enterMapTab();
-    // 切回登記模式時重讀 localStorage 重繪列表，反映 AR 改名稱/刪除等變更(調整4)
+    // 切回登記模式時重讀 localStorage 重繪列表，反映 AR 改名稱/刪除/貨物等變更
     if (name === "register") renderPointList();
+    closeCargoModal(); // v3: 切換頁籤關閉貨物輸入框(避免殘留)
   }
   tabBtns.forEach(function (b) {
     b.addEventListener("click", function () { switchTab(b.dataset.tab); });
@@ -694,43 +676,19 @@
         info.innerHTML = "<b>" + escapeHtml(p.label) + "</b><br>" +
           "<span class='sampling-badge'>📡 定位中...（完成後會自動儲存）</span>";
       } else {
-        // 調整4(v2): 主點/子點徽章
-        var badge = "";
-        if (isChild(p)) {
-          var par = byId(points, p.parentId);
-          badge = "<span class='point-badge child'>子點 · 屬於 " + escapeHtml(par ? par.label : "?") + "</span>";
-        } else if (hasChildren(points, p.id)) {
-          badge = "<span class='point-badge parent'>主點 · " + childrenOf(points, p.id).length + " 子點</span>";
-        }
-        info.innerHTML = "<b>" + escapeHtml(p.label) + "</b>" + badge + "<br>" +
+        // v3: 有在場貨物的點顯示徽章
+        var cargoBadge = hasActiveCargo(p)
+          ? "<span class='point-badge cargo'>📦 " + activeCargo(p).length + " 筆在場</span>" : "";
+        info.innerHTML = "<b>" + escapeHtml(p.label) + "</b>" + cargoBadge + "<br>" +
           p.lat.toFixed(6) + ", " + p.lng.toFixed(6) +
           " (±" + (p.accuracy != null ? p.accuracy.toFixed(1) : "?") + "m" +
           (p.sampleCount != null ? "，" + p.sampleCount + " 筆取樣" : "") + ")<br>" +
-          (isChild(p) ? "<span class='point-meta'>偏移 東 " + (p.offsetEast || 0).toFixed(1) + "m / 北 " + (p.offsetNorth || 0).toFixed(1) + "m</span><br>" : "") +
           "<span class='point-meta'>" + new Date(p.createdAt).toLocaleString() + "</span>" +
           (p.photo ? "<img class='point-thumb' src='" + p.photo + "' alt='照片'>" : "");
       }
 
       var actions = document.createElement("div");
       actions.className = "point-actions";
-
-      if (p.status !== "sampling") {
-        // 調整4(v2): 設為子點 / 還原成獨立點
-        if (isChild(p)) {
-          var freeBtn = document.createElement("button");
-          freeBtn.className = "anchor-btn";
-          freeBtn.textContent = "還原成獨立點";
-          freeBtn.addEventListener("click", function () { detachChild(p.id); });
-          actions.appendChild(freeBtn);
-        } else if (!hasChildren(points, p.id)) {
-          // 獨立點(非子點、且底下沒有子點)才可設為子點(維持扁平兩層)
-          var anchorBtn = document.createElement("button");
-          anchorBtn.className = "anchor-btn";
-          anchorBtn.textContent = "設為子點";
-          anchorBtn.addEventListener("click", function () { openParentPicker(p.id); });
-          actions.appendChild(anchorBtn);
-        }
-      }
 
       var delBtn = document.createElement("button");
       delBtn.className = "delete-btn";
@@ -739,8 +697,8 @@
         delBtn.disabled = true; // 還沒正式存檔，沒有對應的 localStorage 紀錄可刪
       } else {
         delBtn.addEventListener("click", function () {
-          var all = loadPoints().filter(function (x) { return x.id !== p.id && x.parentId !== p.id; });
-          savePoints(all); // 刪主點時一併移除其子點，避免留下孤兒子點
+          var all = loadPoints().filter(function (x) { return x.id !== p.id; });
+          savePoints(all);
           renderPointList();
         });
       }
@@ -750,64 +708,6 @@
       pointList.appendChild(li);
     });
     updateStorageUsage();
-  }
-
-  // 調整4(v2): 把獨立點設為某父點的子點 —— 用彈窗選父點
-  var parentPickerOverlay = document.getElementById("parentPickerOverlay");
-  var parentPickerList = document.getElementById("parentPickerList");
-  var parentPickerCancel = document.getElementById("parentPickerCancel");
-  var parentPickerChildId = null;
-
-  function openParentPicker(childId) {
-    parentPickerChildId = childId;
-    var points = loadPoints();
-    // 可當父點: 非子點 且 排除自己(可以是已有子點的主點，能再掛更多子點)
-    var candidates = points.filter(function (x) { return !isChild(x) && x.id !== childId; });
-    parentPickerList.innerHTML = "";
-    if (candidates.length === 0) {
-      var empty = document.createElement("div");
-      empty.className = "picker-empty";
-      empty.textContent = "目前沒有可當主點的獨立點。";
-      parentPickerList.appendChild(empty);
-    } else {
-      candidates.forEach(function (par) {
-        var btn = document.createElement("button");
-        btn.textContent = par.label + (hasChildren(points, par.id) ? "（已有 " + childrenOf(points, par.id).length + " 子點）" : "");
-        btn.addEventListener("click", function () { attachChild(childId, par.id); });
-        parentPickerList.appendChild(btn);
-      });
-    }
-    parentPickerOverlay.classList.add("active");
-  }
-  function closeParentPicker() { parentPickerOverlay.classList.remove("active"); parentPickerChildId = null; }
-  parentPickerCancel.addEventListener("click", closeParentPicker);
-  parentPickerOverlay.addEventListener("click", function (e) { if (e.target === parentPickerOverlay) closeParentPicker(); });
-
-  function attachChild(childId, parentId) {
-    var points = loadPoints();
-    var child = byId(points, childId), parent = byId(points, parentId);
-    if (!child || !parent) { closeParentPicker(); return; }
-    // 以目前絕對位置換算成相對父點的 offset(此刻換算的絕對位置 = 目前位置，lat/lng 不變)
-    var d = haversineDistance(parent.lat, parent.lng, child.lat, child.lng);
-    var b = bearingTo(parent.lat, parent.lng, child.lat, child.lng);
-    child.parentId = parentId;
-    child.offsetEast = d * Math.sin(toRad(b));
-    child.offsetNorth = d * Math.cos(toRad(b));
-    savePoints(points);
-    closeParentPicker();
-    renderPointList();
-  }
-
-  function detachChild(childId) {
-    var points = loadPoints();
-    var child = byId(points, childId);
-    if (!child) return;
-    // 目前算出的 lat/lng 直接凍結保留，移除 parentId/offset 欄位
-    delete child.parentId;
-    delete child.offsetEast;
-    delete child.offsetNorth;
-    savePoints(points);
-    renderPointList();
   }
 
   function escapeHtml(s) {
@@ -1180,17 +1080,10 @@
     rows.push("<div class='ar-detail-row'><span>登記時精度</span><b>±" + (p.accuracy != null ? p.accuracy.toFixed(1) : "?") + " m</b></div>");
     rows.push("<div class='ar-detail-row'><span>取樣筆數</span><b>" + (p.sampleCount != null ? p.sampleCount : "?") + "</b></div>");
     rows.push("<div class='ar-detail-row'><span>人工修正</span><b>" + (isPointEdited(p) ? escapeHtml(editedFlagText(p)) : "未修正") + "</b></div>");
-    // 調整4(v2): 父子關係
-    var allPts = loadPoints();
-    if (isChild(p)) {
-      var parent = byId(allPts, p.parentId);
-      rows.push("<div class='ar-detail-row'><span>屬於主點</span><b>" + escapeHtml(parent ? parent.label : "(已不存在)") + "</b></div>");
-    } else {
-      var kids = childrenOf(allPts, p.id);
-      if (kids.length > 0) rows.push("<div class='ar-detail-row'><span>主點</span><b>底下有 " + kids.length + " 個子點</b></div>");
-    }
     if (p.photo) rows.push("<img class='ar-detail-photo' src='" + p.photo + "' alt='現場照片'>");
     arDetailBody.innerHTML = rows.join("");
+    // 新增B(v3): 貨物記錄區塊(與地圖 popup 對等)，變更後重開卡片以同步
+    arDetailBody.appendChild(buildCargoSection(pointId, function () { openArDetail(pointId); }));
     arDetailOverlay.classList.add("active");
   }
 
@@ -1688,19 +1581,17 @@
   var mapAutoFetchedLocationOnce = false;
   var clusterModeActive = false; // 調整3(v2): 聚合顯示開關(僅當次瀏覽有效，不存 localStorage)
 
-  // 調整4(v2): 子點(橘)/父點(金星框)marker 樣式
-  var childMarkerIcon = L.divIcon({
-    className: "child-marker", html: "<div class='child-marker-inner'></div>",
-    iconSize: [20, 20], iconAnchor: [10, 10]
-  });
-  var parentMarkerIcon = L.divIcon({
-    className: "parent-marker", html: "<div class='parent-marker-inner'></div>",
-    iconSize: [22, 22], iconAnchor: [11, 11]
-  });
-  // 依點的角色回傳預設(未選取)圖示
+  // 新增B(v3): 有在場貨物的 marker —— 藍底 + 📦 徽章 + 數量
+  function cargoIconWithCount(n) {
+    return L.divIcon({
+      className: "cargo-marker",
+      html: "<div class='cargo-marker-inner'><span class='cargo-count'>" + n + "</span></div>",
+      iconSize: [26, 26], iconAnchor: [13, 13]
+    });
+  }
+  // 依點的狀態回傳預設(未選取)圖示：有在場貨物→貨物徽章，否則一般藍色 marker
   function defaultIconFor(points, p) {
-    if (isChild(p)) return childMarkerIcon;
-    if (hasChildren(points, p.id)) return parentMarkerIcon;
+    if (hasActiveCargo(p)) return cargoIconWithCount(activeCargo(p).length);
     return new L.Icon.Default();
   }
 
@@ -1729,7 +1620,29 @@
 
   // 調整3(v2): 依聚合開關建立 markers 圖層(cluster group 或一般 layer group)
   function buildMarkersLayer() {
-    return clusterModeActive ? L.markerClusterGroup() : L.layerGroup();
+    if (!clusterModeActive) return L.layerGroup();
+    // 點聚合圓圈 → 顯示清單彈窗(每個地標 + 在場貨物摘要)，取代預設縮放
+    var cg = L.markerClusterGroup({ zoomToBoundsOnClick: false, spiderfyOnMaxZoom: false, showCoverageOnHover: false });
+    cg.on("clusterclick", function (e) {
+      var points = loadPoints();
+      var children = e.layer.getAllChildMarkers();
+      var wrap = document.createElement("div");
+      var h = document.createElement("div");
+      h.className = "group-list-header";
+      h.textContent = "此聚合內 " + children.length + " 個地標";
+      wrap.appendChild(h);
+      children.forEach(function (m) {
+        var p = byId(points, m._pointId);
+        if (!p) return;
+        var row = document.createElement("div");
+        row.className = "cluster-list-item";
+        row.innerHTML = "<b>" + escapeHtml(p.label) + "</b><br>" +
+          "<span class='cluster-cargo'>📦 " + escapeHtml(cargoSummary(p)) + "</span>";
+        wrap.appendChild(row);
+      });
+      L.popup({ maxHeight: 300 }).setLatLng(e.latlng).setContent(wrap).openOn(leafletMap);
+    });
+    return cg;
   }
 
   function initMapIfNeeded() {
@@ -1871,9 +1784,9 @@
     else editSelectedIds.splice(idx, 1);
     applySelectionVisuals();
     updateEditStatusBar();
-    // 調整4(v2): 點子點時顯示 8 方向偏移調整面板；點非子點則收起面板
-    if (isChild(point)) openOffsetPanel(point.id);
-    else closeOffsetPanel();
+    // 新增A(v3): 點任一 marker 都顯示 8 方向微調面板(選取後才是最新那點)
+    if (editSelectedIds.indexOf(point.id) !== -1) openOffsetPanel(point.id);
+    else closeOffsetPanel(); // 取消選取該點則收起面板
   }
 
   function selectRecentPoints() {
@@ -1916,7 +1829,6 @@
       p.lat = target.lat;
       p.lng = target.lng;
     });
-    reconcileAfterMove(points, movedIds); // 調整4(v2): 父點移動→子點跟著平移；子點移動→回推 offset
     savePoints(points);
     editSelectedIds = [];
     renderMapMarkers();
@@ -1952,10 +1864,10 @@
           x.lat = h.fromLat;
           x.lng = h.fromLng;
         });
-        recomputeChildrenLatLng(points, p.id); // 調整4(v2): 父點座標變→子點跟著平移
         savePoints(points);
         leafletMap.closePopup();
         renderMapMarkers();
+        if (offsetPanelPointId === p.id) updateOffsetPanelInfo(); // 微調面板同步狀態
       });
       actions.appendChild(undoBtn);
 
@@ -1971,10 +1883,10 @@
             x.lng = x.originalLng;
             x.editHistory = [];
           });
-          recomputeChildrenLatLng(points, p.id); // 調整4(v2): 父點座標變→子點跟著平移
           savePoints(points);
           leafletMap.closePopup();
           renderMapMarkers();
+          if (offsetPanelPointId === p.id) updateOffsetPanelInfo();
         });
         actions.appendChild(restoreBtn);
       }
@@ -1983,14 +1895,204 @@
     return div;
   }
 
-  function buildNormalPopupHtml(p) {
+  // 新增B(v3): 貨物記錄區塊(地圖 popup / AR 詳情共用)。onChange 於資料變更後重繪宿主。
+  function buildCargoSection(pointId, onChange) {
+    var p = byId(loadPoints(), pointId);
+    var sec = document.createElement("div");
+    sec.className = "cargo-section";
+    var h = document.createElement("h4");
+    h.textContent = "📦 貨物記錄（在場）";
+    sec.appendChild(h);
+    var act = p ? activeCargo(p) : [];
+    if (act.length === 0) {
+      var empty = document.createElement("div");
+      empty.className = "cargo-empty";
+      empty.textContent = "目前沒有在場貨物";
+      sec.appendChild(empty);
+    } else {
+      act.forEach(function (rec) {
+        var item = document.createElement("div");
+        item.className = "cargo-item";
+        var name = document.createElement("div");
+        name.className = "cargo-item-name";
+        name.textContent = rec.name + (rec.quantity != null ? "　" + rec.quantity + (rec.unit || "") : (rec.unit ? "　" + rec.unit : ""));
+        item.appendChild(name);
+        var meta = document.createElement("div");
+        meta.className = "cargo-item-meta";
+        meta.textContent = "進場：" + new Date(rec.arrivedAt).toLocaleString() + (rec.note ? "　備註：" + rec.note : "");
+        item.appendChild(meta);
+        if (rec.photo) {
+          var img = document.createElement("img");
+          img.className = "cargo-thumb";
+          img.src = rec.photo;
+          item.appendChild(img);
+        }
+        var ship = document.createElement("button");
+        ship.className = "cargo-ship-btn";
+        ship.textContent = "標記已出貨";
+        ship.addEventListener("click", function () { shipCargo(pointId, rec.id, onChange); });
+        item.appendChild(ship);
+        sec.appendChild(item);
+      });
+    }
+    var addBtn = document.createElement("button");
+    addBtn.className = "cargo-add-btn";
+    addBtn.textContent = "➕ 新增貨物記錄";
+    addBtn.addEventListener("click", function () { openCargoModal(pointId, onChange); });
+    sec.appendChild(addBtn);
+    return sec;
+  }
+
+  // 標記已出貨: 只改 status/shippedAt，絕不刪除(記錄永久保留供報表)
+  function shipCargo(pointId, recId, onChange) {
+    var pv = byId(loadPoints(), pointId);
+    var rv = pv && pv.cargoRecords ? pv.cargoRecords.filter(function (r) { return r.id === recId; })[0] : null;
+    if (!rv) return;
+    if (!window.confirm("確定將「" + rv.name + "」標記為已出貨？\n（記錄會永久保留，僅狀態變更）")) return;
+    var points = loadPoints();
+    var p = byId(points, pointId);
+    (p.cargoRecords || []).forEach(function (r) {
+      if (r.id === recId) { r.status = "shipped"; r.shippedAt = new Date().toISOString(); }
+    });
+    savePoints(points);
+    if (onChange) onChange();
+  }
+
+  // 貨物照片可能塞爆空間 → 比照登記照片的 quota 保護(失敗則去照片重存)
+  function saveWithCargoQuotaGuard(points, cargoRec) {
+    try { savePoints(points); return true; }
+    catch (e) {
+      if (isQuotaError(e) && cargoRec && cargoRec.photo) {
+        delete cargoRec.photo;
+        try { savePoints(points); window.alert("儲存空間已滿，此貨物記錄將不含照片儲存。"); return true; }
+        catch (e2) { /* fall through */ }
+      }
+      window.alert("儲存空間已滿，無法儲存這筆貨物記錄，請先刪除部分資料再試。");
+      return false;
+    }
+  }
+
+  function buildNormalPopupContent(p) {
+    var div = document.createElement("div");
     var gmapsUrl = "https://www.google.com/maps/search/?api=1&query=" + p.lat + "," + p.lng;
-    return "<b>" + escapeHtml(p.label) + "</b><br>" +
+    var head = document.createElement("div");
+    head.innerHTML = "<b>" + escapeHtml(p.label) + "</b><br>" +
       (isPointEdited(p) ? "<span class='popup-edited-flag'>⚠️ " + editedFlagText(p) + "</span><br>" : "") +
       "登記時間: " + new Date(p.createdAt).toLocaleString() + "<br>" +
       "登記時精度: ±" + (p.accuracy != null ? p.accuracy.toFixed(1) : "?") + "m<br>" +
       "<a href='" + gmapsUrl + "' target='_blank' rel='noopener noreferrer'>在 Google 地圖開啟</a>";
+    div.appendChild(head);
+    div.appendChild(buildCargoSection(p.id, function () { refreshMapPopupFor(p.id); }));
+    return div;
   }
+
+  // 貨物變更後重繪 markers(更新徽章)並重新開啟該點 popup
+  function refreshMapPopupFor(pointId) {
+    renderMapMarkers();
+    var ref = mapMarkerRefs.filter(function (r) { return r.point.id === pointId; })[0];
+    if (ref) ref.marker.openPopup();
+  }
+
+  // ---------- 新增B(v3): 貨物記錄輸入框 ----------
+  var cargoModalOverlay = document.getElementById("cargoModalOverlay");
+  var cargoName = document.getElementById("cargoName");
+  var cargoQty = document.getElementById("cargoQty");
+  var cargoUnit = document.getElementById("cargoUnit");
+  var cargoArrived = document.getElementById("cargoArrived");
+  var cargoNote = document.getElementById("cargoNote");
+  var cargoModalConfirm = document.getElementById("cargoModalConfirm");
+  var cargoModalCancel = document.getElementById("cargoModalCancel");
+  var cargoPhotoInput = document.getElementById("cargoPhotoInput");
+  var cargoPhotoBtn = document.getElementById("cargoPhotoBtn");
+  var cargoPhotoPreview = document.getElementById("cargoPhotoPreview");
+  var cargoPhotoThumb = document.getElementById("cargoPhotoThumb");
+  var cargoPhotoRemove = document.getElementById("cargoPhotoRemove");
+  var cargoModalTargetId = null;
+  var cargoModalOnChange = null;
+  var cargoModalPhoto = null;
+
+  // Date → datetime-local 輸入值(本地時區 YYYY-MM-DDTHH:mm)
+  function toLocalDatetimeValue(d) {
+    var p2 = function (n) { return (n < 10 ? "0" : "") + n; };
+    return d.getFullYear() + "-" + p2(d.getMonth() + 1) + "-" + p2(d.getDate()) +
+      "T" + p2(d.getHours()) + ":" + p2(d.getMinutes());
+  }
+  function updateCargoModalButtons() {
+    var has = cargoName.value.trim().length > 0;
+    cargoModalConfirm.disabled = !has;
+    cargoModalConfirm.textContent = has ? "確認新增" : "請輸入名稱";
+  }
+  function resetCargoPhotoUi() {
+    cargoModalPhoto = null;
+    cargoPhotoThumb.src = "";
+    cargoPhotoPreview.style.display = "none";
+    cargoPhotoBtn.style.display = "block";
+    cargoPhotoBtn.disabled = false;
+    cargoPhotoBtn.textContent = "📷 拍照（選填）";
+    cargoPhotoInput.value = "";
+  }
+  function openCargoModal(pointId, onChange) {
+    cargoModalTargetId = pointId;
+    cargoModalOnChange = onChange || null;
+    cargoName.value = ""; cargoQty.value = ""; cargoUnit.value = ""; cargoNote.value = "";
+    cargoArrived.value = toLocalDatetimeValue(new Date()); // 自動填當下，可手動改
+    resetCargoPhotoUi();
+    updateCargoModalButtons();
+    cargoModalOverlay.classList.add("active");
+    cargoName.focus();
+  }
+  function closeCargoModal() { cargoModalOverlay.classList.remove("active"); }
+
+  cargoName.addEventListener("input", updateCargoModalButtons);
+  cargoModalCancel.addEventListener("click", closeCargoModal);
+  cargoModalOverlay.addEventListener("click", function (e) { if (e.target === cargoModalOverlay) closeCargoModal(); });
+
+  cargoPhotoBtn.addEventListener("click", function () { cargoPhotoInput.click(); });
+  cargoPhotoInput.addEventListener("change", function () {
+    var file = cargoPhotoInput.files && cargoPhotoInput.files[0];
+    if (!file) return;
+    cargoPhotoBtn.textContent = "📷 壓縮中...";
+    cargoPhotoBtn.disabled = true;
+    compressImageFile(file).then(function (dataUrl) { // 沿用登記照片壓縮(PHOTO_MAX_EDGE/QUALITY)
+      cargoModalPhoto = dataUrl;
+      cargoPhotoThumb.src = dataUrl;
+      cargoPhotoPreview.style.display = "flex";
+      cargoPhotoBtn.style.display = "none";
+      cargoPhotoBtn.disabled = false;
+      cargoPhotoBtn.textContent = "📷 拍照（選填）";
+    }).catch(function (err) {
+      cargoPhotoBtn.disabled = false;
+      cargoPhotoBtn.textContent = "📷 拍照（選填）";
+      window.alert("照片處理失敗：" + err.message);
+    });
+    cargoPhotoInput.value = "";
+  });
+  cargoPhotoRemove.addEventListener("click", resetCargoPhotoUi);
+
+  cargoModalConfirm.addEventListener("click", function () {
+    var name = cargoName.value.trim();
+    if (!name || cargoModalTargetId == null) return;
+    var qtyRaw = cargoQty.value.trim();
+    var qty = qtyRaw === "" ? null : parseFloat(qtyRaw);
+    if (qty != null && isNaN(qty)) qty = null;
+    var rec = {
+      id: uid(), name: name, quantity: qty, unit: cargoUnit.value.trim() || null,
+      arrivedAt: cargoArrived.value ? new Date(cargoArrived.value).toISOString() : new Date().toISOString(),
+      shippedAt: null, status: "active"
+    };
+    var note = cargoNote.value.trim();
+    if (note) rec.note = note;
+    if (cargoModalPhoto) rec.photo = cargoModalPhoto;
+    var points = loadPoints();
+    var p = byId(points, cargoModalTargetId);
+    if (!p) { closeCargoModal(); return; }
+    if (!p.cargoRecords) p.cargoRecords = [];
+    p.cargoRecords.push(rec);
+    saveWithCargoQuotaGuard(points, rec); // 空間滿時自動改存無照片版本，不讓整筆遺失
+    var cb = cargoModalOnChange;
+    closeCargoModal();
+    if (cb) cb();
+  });
 
   function renderMapMarkers() {
     mapMarkersLayer.clearLayers();
@@ -1998,14 +2100,15 @@
     mapMarkerRefs = [];
     var points = loadPoints();
     points.forEach(function (p) {
-      // 調整4(v2): 依角色套用圖示(量測模式維持預設藍以免與選取樣式混淆)
+      // v3: 有在場貨物→貨物徽章圖示，否則一般藍色(量測模式維持預設藍以免與選取樣式混淆)
       var icon = measureModeActive ? new L.Icon.Default() : defaultIconFor(points, p);
       var marker = L.marker([p.lat, p.lng], { icon: icon });
+      marker._pointId = p.id; // 供聚合清單對照
       mapMarkersLayer.addLayer(marker); // 支援 cluster group 與 layer group
       if (editModeActive) {
         marker.bindPopup(buildEditPopupContent(p));
       } else if (!measureModeActive) {
-        marker.bindPopup(buildNormalPopupHtml(p));
+        marker.bindPopup(buildNormalPopupContent(p)); // v3: DOM popup 含貨物區塊
       }
       marker.on("click", function () {
         if (measureModeActive) onMapMarkerClick(p, marker);
@@ -2014,18 +2117,6 @@
       marker.on("dragend", function () { onEditMarkerDragEnd(p, marker); });
       mapMarkerRefs.push({ point: p, marker: marker });
     });
-
-    // 調整4(v2): 子點↔父點虛線(聚合開啟時不畫，避免干擾 cluster 圖示)
-    if (!clusterModeActive) {
-      points.forEach(function (c) {
-        if (!isChild(c)) return;
-        var parent = byId(points, c.parentId);
-        if (!parent) return;
-        L.polyline([[parent.lat, parent.lng], [c.lat, c.lng]], {
-          color: "#ff8c1a", weight: 1.5, dashArray: "4,6", opacity: 0.9
-        }).addTo(mapLinesLayer);
-      });
-    }
 
     if (editModeActive) applySelectionVisuals();
   }
@@ -2075,16 +2166,16 @@
     );
   }
 
-  // ---------- 調整4(v2): 8 方向偏移調整面板 ----------
+  // ---------- 新增A(v3): 單點 8 方向位置微調(所有點適用) ----------
   var offsetPanel = document.getElementById("offsetPanel");
   var offsetPanelInfo = document.getElementById("offsetPanelInfo");
   var offsetStepRow = document.getElementById("offsetStepRow");
   var offsetPad = document.getElementById("offsetPad");
   var offsetPanelClose = document.getElementById("offsetPanelClose");
-  var offsetPanelChildId = null;
+  var offsetPanelPointId = null;
   var offsetStepM = OFFSET_STEP_DEFAULT_M;
 
-  // 8 方向 → (東偏移量, 北偏移量) 的單位向量(對角線在兩軸各動一步)
+  // 8 方向 → (東位移, 北位移) 單位向量(對角線兩軸各動一步)
   var OFFSET_DIRECTIONS = {
     "NW": [-1, 1], "N": [0, 1], "NE": [1, 1],
     "W":  [-1, 0], "E": [1, 0],
@@ -2119,7 +2210,7 @@
         cell.textContent = PAD_ARROWS[dir];
         cell.addEventListener("click", function () {
           var v = OFFSET_DIRECTIONS[dir];
-          nudgeChildOffset(offsetPanelChildId, v[0] * offsetStepM, v[1] * offsetStepM);
+          nudgePoint(offsetPanelPointId, v[0] * offsetStepM, v[1] * offsetStepM);
         });
       }
       offsetPad.appendChild(cell);
@@ -2128,16 +2219,15 @@
 
   function updateOffsetPanelInfo() {
     var points = loadPoints();
-    var c = byId(points, offsetPanelChildId);
-    if (!c) { closeOffsetPanel(); return; }
-    var parent = byId(points, c.parentId);
-    offsetPanelInfo.innerHTML = "調整子點「" + escapeHtml(c.label) + "」<br>" +
-      "主點：" + escapeHtml(parent ? parent.label : "(已不存在)") + "<br>" +
-      "目前偏移：東 " + (c.offsetEast || 0).toFixed(1) + "m / 北 " + (c.offsetNorth || 0).toFixed(1) + "m";
+    var p = byId(points, offsetPanelPointId);
+    if (!p) { closeOffsetPanel(); return; }
+    offsetPanelInfo.innerHTML = "微調「" + escapeHtml(p.label) + "」位置<br>" +
+      "座標：" + p.lat.toFixed(6) + ", " + p.lng.toFixed(6) + "<br>" +
+      "狀態：" + (isPointEdited(p) ? "已修正" : "GPS 原始");
   }
 
-  function openOffsetPanel(childId) {
-    offsetPanelChildId = childId;
+  function openOffsetPanel(pointId) {
+    offsetPanelPointId = pointId;
     buildOffsetStepRow();
     buildOffsetPad();
     updateOffsetPanelInfo();
@@ -2145,26 +2235,28 @@
   }
   function closeOffsetPanel() {
     offsetPanel.classList.remove("active");
-    offsetPanelChildId = null;
+    offsetPanelPointId = null;
   }
   offsetPanelClose.addEventListener("click", closeOffsetPanel);
 
-  // 按方向鍵 → 調整該子點 offset、即時重算 lat/lng、存檔、地圖同步移動
-  function nudgeChildOffset(childId, dEast, dNorth) {
-    if (childId == null) return;
+  // 按方向鍵 → 直接位移該點 lat/lng(公尺→度近似)，比照拖曳寫入 original/editHistory，共用還原機制
+  function nudgePoint(pointId, dEast, dNorth) {
+    if (pointId == null) return;
     var points = loadPoints();
-    var c = byId(points, childId);
-    if (!c || !isChild(c)) return;
-    c.offsetEast = (c.offsetEast || 0) + dEast;
-    c.offsetNorth = (c.offsetNorth || 0) + dNorth;
-    var parent = byId(points, c.parentId);
-    if (parent) {
-      var ll = computeChildLatLng(parent.lat, parent.lng, c.offsetEast, c.offsetNorth);
-      c.lat = ll.lat;
-      c.lng = ll.lng;
+    var p = byId(points, pointId);
+    if (!p) return;
+    if (p.originalLat == null || p.originalLng == null) { // 首次修正先保留 GPS 原始
+      p.originalLat = p.lat;
+      p.originalLng = p.lng;
     }
+    var newLat = p.lat + dNorth / 111320;
+    var newLng = p.lng + dEast / (111320 * Math.cos(toRad(p.lat)));
+    if (!p.editHistory) p.editHistory = [];
+    p.editHistory.push({ editedAt: new Date().toISOString(), fromLat: p.lat, fromLng: p.lng, toLat: newLat, toLng: newLng });
+    p.lat = newLat;
+    p.lng = newLng;
     savePoints(points);
-    renderMapMarkers();   // marker 移到新位置 + 虛線更新
+    renderMapMarkers();
     updateOffsetPanelInfo();
   }
 
