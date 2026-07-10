@@ -176,13 +176,25 @@
   }
   .group-list-item .group-list-dist { color: #9cf; font-weight: normal; flex: 0 0 auto; }
 
-  #viewTopBar {
-    position: absolute; top: 0; left: 0; right: 0; z-index: 5;
-    display: flex; gap: 8px; padding: 8px; background: linear-gradient(rgba(0,0,0,0.6), transparent);
+  /* 調整1: 懸浮收合控制面板(地圖 + AR 共用) —— fixed 定位，不被彈窗/卡片擠壓 */
+  /* 只在所屬 screen 為 active(display:block) 時才會顯示(祖先 display:none 會整個隱藏) */
+  .ctrl-toggle {
+    position: fixed; top: 60px; right: 10px; z-index: 1200;
+    width: 46px; height: 46px; border-radius: 23px; font-size: 22px; line-height: 1;
+    background: rgba(20,20,20,0.9); color: #fff; border: 1px solid #888; cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
   }
-  #viewTopBar button {
-    flex: 0 0 auto; padding: 10px 12px; font-size: 14px; font-weight: bold;
-    background: #222; color: #fff; border: 1px solid #666; border-radius: 8px;
+  .ctrl-panel {
+    position: fixed; top: 112px; right: 10px; z-index: 1150;
+    display: none; flex-direction: column; align-items: stretch; gap: 6px;
+    max-width: 78vw; max-height: 70vh; overflow-y: auto;
+    background: rgba(15,15,15,0.94); border: 1px solid #666; border-radius: 12px; padding: 10px;
+  }
+  .ctrl-panel.open { display: flex; }
+  .ctrl-panel button {
+    box-sizing: border-box; min-height: var(--min-touch, 50px);
+    padding: 10px 14px; font-size: 14px; font-weight: bold;
+    background: #222; color: #fff; border: 1px solid #666; border-radius: 8px; cursor: pointer;
   }
   #fovWrap { display: flex; align-items: center; gap: 6px; background: #222; border: 1px solid #666; border-radius: 8px; padding: 6px 10px; }
   #fovWrap label { font-size: 13px; }
@@ -210,14 +222,6 @@
   /* ---------- 地圖預覽 ---------- */
   #mapScreen { padding: 0; }
   #leafletMap { position: absolute; inset: 0; background: #222; }
-  #mapTopBar {
-    position: absolute; top: 8px; right: 8px; z-index: 500;
-    display: flex; flex-direction: column; align-items: flex-end; gap: 6px;
-  }
-  #mapTopBar button {
-    padding: 10px 14px; font-size: 14px; font-weight: bold;
-    background: #222; color: #fff; border: 1px solid #666; border-radius: 8px;
-  }
   #mapStatus {
     background: rgba(0, 0, 0, 0.7); color: #ff0; font-size: 12px;
     padding: 4px 8px; border-radius: 6px; max-width: 200px; text-align: right;
@@ -308,6 +312,60 @@
     width: 100%; box-sizing: border-box; min-height: var(--min-touch, 50px); padding: 10px;
     font-size: 14px; font-weight: bold; background: #333; color: #fff; border: 1px solid #666; border-radius: 8px; cursor: pointer;
   }
+  /* 通用微調 pad(供 AR 詳情卡片重用，調整5) */
+  .nudge-step-row { display: flex; gap: 6px; margin: 6px 0; }
+  .nudge-step-row button {
+    flex: 1; padding: 8px 0; font-size: 13px; font-weight: bold; cursor: pointer;
+    background: #223; color: #fff; border: 1px solid #456; border-radius: 6px;
+  }
+  .nudge-step-row button.active { background: #ff8c1a; color: #000; border-color: #ff8c1a; }
+  .nudge-pad { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin: 6px 0; }
+  .nudge-pad button {
+    box-sizing: border-box; min-width: var(--min-touch, 50px); min-height: var(--min-touch, 50px);
+    font-size: 18px; font-weight: bold; cursor: pointer;
+    background: #234; color: #fff; border: 1px solid #567; border-radius: 8px;
+  }
+  .nudge-pad .pad-center { background: transparent; border: none; color: #789; font-size: 12px; cursor: default; }
+  #arDetailNudgeWrap { display: none; margin-top: 10px; border-top: 1px solid #234; padding-top: 8px; }
+  #arDetailNudgeWrap.open { display: block; }
+  #arDetailNudgeInfo { color: #9c9; font-size: 13px; line-height: 1.5; margin-bottom: 4px; }
+
+  /* ---------- 顏色標籤 / 出貨模式(調整4) ---------- */
+  #cargoColorRow { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+  #cargoColor { width: 48px; height: 40px; border: 1px solid #666; border-radius: 8px; background: none; cursor: pointer; padding: 0; }
+  #cargoRecentColors { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+  .recent-swatch {
+    width: 30px; height: 30px; border-radius: 6px; border: 2px solid #fff; cursor: pointer; box-sizing: border-box;
+  }
+  .cargo-color-dot { display: inline-block; width: 12px; height: 12px; border-radius: 3px; margin-right: 5px; vertical-align: middle; border: 1px solid rgba(255,255,255,0.4); }
+  #shipColorList, #pointPickerList { max-height: 44vh; overflow-y: auto; margin-bottom: 12px; }
+  #shipColorList button, #pointPickerList button {
+    display: flex; align-items: center; gap: 8px; width: 100%; box-sizing: border-box; min-height: var(--min-touch, 50px);
+    text-align: left; padding: 10px 12px; margin-bottom: 6px; font-size: 15px; font-weight: bold;
+    background: #1a2333; color: #fff; border: 1px solid #456; border-radius: 8px; cursor: pointer;
+  }
+  #shipColorList .picker-empty, #pointPickerList .picker-empty { color: #999; font-size: 14px; padding: 12px 0; }
+  .ship-swatch { width: 22px; height: 22px; border-radius: 5px; border: 1px solid #fff; flex: 0 0 auto; }
+  .cargo-move-btn { margin-top: 4px; margin-left: 6px; background: #345; color: #fff; border: 1px solid #567; border-radius: 6px; padding: 6px 10px; font-size: 12px; font-weight: bold; cursor: pointer; }
+
+  /* ---------- 商品頁籤(調整3) ---------- */
+  #productsScreen { overflow-y: auto; padding: 12px; }
+  #productsToolbar { margin-bottom: 10px; }
+  #productsFilters { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  #productsFilters label { font-size: 13px; color: #ccc; display: flex; align-items: center; gap: 4px; }
+  #productsFilters select { font-size: 14px; padding: 6px; background: #111; color: #fff; border: 1px solid #666; border-radius: 6px; }
+  #productsList { list-style: none; }
+  .product-item { background: #181818; border: 1px solid #444; border-radius: 10px; padding: 12px; margin-bottom: 10px; }
+  .product-item .product-head { font-size: 16px; font-weight: bold; display: flex; align-items: center; gap: 6px; }
+  .product-item .product-meta { color: #9ab; font-size: 13px; line-height: 1.5; margin-top: 4px; }
+  .product-actions { display: none; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
+  .product-item.expanded .product-actions { display: flex; }
+  .product-actions button {
+    box-sizing: border-box; min-height: var(--min-touch, 50px); padding: 8px 12px; font-size: 13px; font-weight: bold;
+    border-radius: 8px; cursor: pointer; border: 1px solid #666; background: #333; color: #fff;
+  }
+  #productsEmpty { color: #777; font-size: 14px; padding: 20px 0; text-align: center; }
+  .point-badge.cargo.clickable { cursor: pointer; }
 
   /* ---------- 版本號 ---------- */
   #appVersion {
@@ -324,6 +382,7 @@
     <button class="tab-btn active" data-tab="register">登記模式</button>
     <button class="tab-btn" data-tab="view">檢視模式</button>
     <button class="tab-btn" data-tab="map">地圖預覽</button>
+    <button class="tab-btn" data-tab="products">📦 商品</button>
   </div>
 
   <!-- ===================== 登記模式 ===================== -->
@@ -370,7 +429,12 @@
     <div id="arDetailOverlay" class="ar-overlay">
       <div id="arDetailCard">
         <div id="arDetailBody"></div>
+        <div id="arDetailNudgeWrap">
+          <div id="arDetailNudgeInfo"></div>
+          <div id="arDetailNudgePanel"></div>
+        </div>
         <div id="arDetailActions">
+          <button id="arDetailNudge">📍 位置微調</button>
           <button id="arDetailRename">✏️ 改名稱</button>
           <button id="arDetailDelete">🗑️ 刪除</button>
           <button id="arDetailClose">✕ 關閉</button>
@@ -396,7 +460,9 @@
       </div>
     </div>
 
-    <div id="viewTopBar">
+    <!-- 調整1: 懸浮收合控制面板 -->
+    <button id="viewCtrlToggle" class="ctrl-toggle">☰</button>
+    <div id="viewTopBar" class="ctrl-panel">
       <button id="btnBack">← 回登記模式</button>
       <div id="fovWrap">
         <label for="fovInput">FOV°</label>
@@ -406,6 +472,7 @@
         <label for="maxDistInput">顯示距離(m)</label>
         <input id="maxDistInput" type="number" value="150" min="5" max="5000" step="5">
       </div>
+      <button id="btnViewShipping">🚚 出貨模式：關閉</button>
     </div>
 
     <div id="diagnostics">初始化中...</div>
@@ -414,13 +481,16 @@
   <!-- ===================== 地圖預覽 ===================== -->
   <div id="mapScreen" class="screen">
     <div id="leafletMap"></div>
-    <div id="mapTopBar">
+    <!-- 調整1: 懸浮收合控制面板 -->
+    <button id="mapCtrlToggle" class="ctrl-toggle">☰</button>
+    <div id="mapTopBar" class="ctrl-panel">
       <button id="btnRefreshMapLocation">📍 重新整理目前位置</button>
       <button id="btnToggleMeasureMode">📏 量測模式：關閉</button>
       <button id="btnClearMeasure">🧹 清除量測</button>
       <button id="btnToggleEditMode">✏️ 編輯模式：關閉</button>
       <button id="btnSelectRecent">🕐 選取最近 5 筆</button>
       <button id="btnToggleCluster">🔗 聚合顯示：關閉</button>
+      <button id="btnMapShipping">🚚 出貨模式：關閉</button>
       <div id="mapStatus"></div>
     </div>
     <div id="measureResultBar"></div>
@@ -433,6 +503,24 @@
     </div>
   </div>
 
+  <!-- ===================== 商品頁籤 ===================== -->
+  <div id="productsScreen" class="screen">
+    <div id="productsToolbar">
+      <button id="btnAddCargoEntry" class="big-btn" style="margin-bottom:10px;">➕ 新增貨物記錄</button>
+      <div id="productsFilters">
+        <label>地標
+          <select id="filterLandmark"><option value="">全部</option></select>
+        </label>
+        <label>顏色
+          <select id="filterColor"><option value="">全部</option></select>
+        </label>
+        <button id="btnClearProductFilters" class="secondary-btn" style="padding:8px 12px;font-size:14px;margin:0;">清除篩選</button>
+      </div>
+    </div>
+    <div id="productsList"></div>
+    <div id="productsEmpty">目前沒有在場貨物</div>
+  </div>
+
 </div>
 
 <!-- 貨物記錄新增輸入框(地圖 popup / AR 詳情共用) -->
@@ -442,6 +530,12 @@
     <input id="cargoName" type="text" class="modal-input" placeholder="名稱／批次（必填）">
     <input id="cargoQty" type="number" class="modal-input" placeholder="數量（選填）">
     <input id="cargoUnit" type="text" class="modal-input" placeholder="單位（選填，例：支／噸）">
+    <label class="cargo-field-label">顏色標籤</label>
+    <div id="cargoColorRow">
+      <input id="cargoColor" type="color" value="#ff3b30">
+      <input id="cargoColorLabel" type="text" class="modal-input" style="margin:0;flex:1;" placeholder="顏色名稱（選填，例：鮮紅）">
+    </div>
+    <div id="cargoRecentColors"></div>
     <label class="cargo-field-label">進場時間</label>
     <input id="cargoArrived" type="datetime-local" class="modal-input">
     <input id="cargoNote" type="text" class="modal-input" placeholder="備註（選填）">
@@ -460,6 +554,28 @@
   </div>
 </div>
 
+<!-- 通用地標選擇清單(移動貨物 / 新增貨物選地標) -->
+<div id="pointPickerOverlay" class="modal-overlay">
+  <div class="modal-box">
+    <div id="pointPickerTitle" class="modal-coords">選擇地標</div>
+    <div id="pointPickerList"></div>
+    <div class="modal-actions">
+      <button id="pointPickerCancel">取消</button>
+    </div>
+  </div>
+</div>
+
+<!-- 出貨模式顏色選擇 -->
+<div id="shipColorOverlay" class="modal-overlay">
+  <div class="modal-box">
+    <div class="modal-coords">出貨模式：選擇要找的顏色</div>
+    <div id="shipColorList"></div>
+    <div class="modal-actions">
+      <button id="shipColorCancel">取消</button>
+    </div>
+  </div>
+</div>
+
 <div id="appVersion"></div>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
@@ -469,7 +585,10 @@
   "use strict";
 
   var STORAGE_KEY = "gpsArPoints_v1";
-  var APP_VERSION = "2.1.0"; // 每次改版記得同步更新
+  var APP_VERSION = "2.2.0"; // 每次改版記得同步更新
+  var RECENT_COLORS_KEY = "gpsArRecentColors_v1"; // 調整4: 最近使用顏色清單
+  var RECENT_COLORS_MAX = 10;
+  var DEFAULT_CARGO_COLOR = "#ff3b30";
 
   // ---- 可調參數 ----
   var AR_RENDER_THROTTLE_MS = 150;             // 修正1: updateAR() 畫面重繪節流間隔(ms)
@@ -585,12 +704,65 @@
     return act.length + " 筆在場 · " + act[0].name + (act.length > 1 ? " 等" : "");
   }
 
+  // v4: 所有地標的 active 貨物攤平成 [{rec, point}]
+  function allActiveCargoFlat(points) {
+    var out = [];
+    points.forEach(function (p) {
+      activeCargo(p).forEach(function (rec) { out.push({ rec: rec, point: p }); });
+    });
+    return out;
+  }
+  // v4: 目前所有 active 貨物用過的顏色(去重，回傳 [{colorHex, colorLabel}])
+  function distinctActiveColors(points) {
+    var seen = {}, out = [];
+    allActiveCargoFlat(points).forEach(function (e) {
+      var hex = e.rec.colorHex;
+      if (!hex || seen[hex]) return;
+      seen[hex] = true;
+      out.push({ colorHex: hex, colorLabel: e.rec.colorLabel || "" });
+    });
+    return out;
+  }
+  function loadRecentColors() {
+    try { return JSON.parse(localStorage.getItem(RECENT_COLORS_KEY)) || []; }
+    catch (e) { return []; }
+  }
+  // 把一組顏色移到最近清單最前面(去重、限長)
+  function pushRecentColor(colorHex, colorLabel) {
+    if (!colorHex) return;
+    var list = loadRecentColors().filter(function (c) { return c.colorHex !== colorHex; });
+    list.unshift({ colorHex: colorHex, colorLabel: colorLabel || "" });
+    if (list.length > RECENT_COLORS_MAX) list = list.slice(0, RECENT_COLORS_MAX);
+    try { localStorage.setItem(RECENT_COLORS_KEY, JSON.stringify(list)); } catch (e) { /* 顏色清單非關鍵，滿了就算了 */ }
+  }
+  // v4: 一筆貨物是否含指定顏色
+  function cargoHasColor(p, colorHex) {
+    return activeCargo(p).some(function (r) { return r.colorHex === colorHex; });
+  }
+  // v4: 把一筆貨物記錄從 fromPoint 搬到 toPoint(附 moveHistory)
+  function moveCargoRecord(fromPointId, recId, toPointId) {
+    var points = loadPoints();
+    var from = byId(points, fromPointId), to = byId(points, toPointId);
+    if (!from || !to || !from.cargoRecords) return false;
+    var idx = -1;
+    from.cargoRecords.forEach(function (r, i) { if (r.id === recId) idx = i; });
+    if (idx === -1) return false;
+    var rec = from.cargoRecords.splice(idx, 1)[0];
+    if (!rec.moveHistory) rec.moveHistory = [];
+    rec.moveHistory.push({ fromPointId: from.id, fromLabel: from.label, toPointId: to.id, toLabel: to.label, movedAt: new Date().toISOString() });
+    if (!to.cargoRecords) to.cargoRecords = [];
+    to.cargoRecords.push(rec);
+    savePoints(points);
+    return true;
+  }
+
   // ===================== Tabs =====================
   var tabBtns = document.querySelectorAll(".tab-btn");
   var screens = {
     register: document.getElementById("registerScreen"),
     view: document.getElementById("viewScreen"),
-    map: document.getElementById("mapScreen")
+    map: document.getElementById("mapScreen"),
+    products: document.getElementById("productsScreen")
   };
 
   function switchTab(name) {
@@ -600,10 +772,33 @@
     if (name === "map") enterMapTab();
     // 切回登記模式時重讀 localStorage 重繪列表，反映 AR 改名稱/刪除/貨物等變更
     if (name === "register") renderPointList();
-    closeCargoModal(); // v3: 切換頁籤關閉貨物輸入框(避免殘留)
+    if (name === "products") renderProducts(); // 調整3: 進商品頁籤重讀資料
+    closeCargoModal(); // 切換頁籤關閉貨物輸入框(避免殘留)
+    closeAllCtrlPanels(); // 調整1: 切頁籤收合懸浮面板
   }
   tabBtns.forEach(function (b) {
     b.addEventListener("click", function () { switchTab(b.dataset.tab); });
+  });
+
+  // ---------- 調整1: 懸浮收合控制面板 ----------
+  var mapCtrlToggle = document.getElementById("mapCtrlToggle");
+  var mapTopBar = document.getElementById("mapTopBar");
+  var viewCtrlToggle = document.getElementById("viewCtrlToggle");
+  var viewTopBar = document.getElementById("viewTopBar");
+  function closeAllCtrlPanels() {
+    mapTopBar.classList.remove("open");
+    viewTopBar.classList.remove("open");
+  }
+  [[mapCtrlToggle, mapTopBar], [viewCtrlToggle, viewTopBar]].forEach(function (pair) {
+    pair[0].addEventListener("click", function (e) { e.stopPropagation(); pair[1].classList.toggle("open"); });
+  });
+  // 點面板/切換鈕以外的地方收合
+  document.addEventListener("click", function (e) {
+    [[mapCtrlToggle, mapTopBar], [viewCtrlToggle, viewTopBar]].forEach(function (pair) {
+      if (pair[1].classList.contains("open") && !pair[1].contains(e.target) && e.target !== pair[0]) {
+        pair[1].classList.remove("open");
+      }
+    });
   });
 
   // ===================== Register mode =====================
@@ -676,15 +871,18 @@
         info.innerHTML = "<b>" + escapeHtml(p.label) + "</b><br>" +
           "<span class='sampling-badge'>📡 定位中...（完成後會自動儲存）</span>";
       } else {
-        // v3: 有在場貨物的點顯示徽章
-        var cargoBadge = hasActiveCargo(p)
-          ? "<span class='point-badge cargo'>📦 " + activeCargo(p).length + " 筆在場</span>" : "";
+        // v4: 有在場貨物的點顯示可點擊徽章(點擊跳轉商品頁籤並套用此地標篩選)；操作入口收斂在商品頁籤
+        var nCargo = activeCargo(p).length;
+        var cargoBadge = nCargo > 0
+          ? "<span class='point-badge cargo clickable' data-cargo-jump='1'>📦 " + nCargo + " 筆在場</span>" : "";
         info.innerHTML = "<b>" + escapeHtml(p.label) + "</b>" + cargoBadge + "<br>" +
           p.lat.toFixed(6) + ", " + p.lng.toFixed(6) +
           " (±" + (p.accuracy != null ? p.accuracy.toFixed(1) : "?") + "m" +
           (p.sampleCount != null ? "，" + p.sampleCount + " 筆取樣" : "") + ")<br>" +
           "<span class='point-meta'>" + new Date(p.createdAt).toLocaleString() + "</span>" +
           (p.photo ? "<img class='point-thumb' src='" + p.photo + "' alt='照片'>" : "");
+        var jumpBadge = info.querySelector("[data-cargo-jump]");
+        if (jumpBadge) jumpBadge.addEventListener("click", function () { gotoProductsForLandmark(p.id); });
       }
 
       var actions = document.createElement("div");
@@ -1029,6 +1227,10 @@
   var arDetailBody = document.getElementById("arDetailBody");
   var arDetailRename = document.getElementById("arDetailRename");
   var arDetailDelete = document.getElementById("arDetailDelete");
+  var arDetailNudge = document.getElementById("arDetailNudge");
+  var arDetailNudgeWrap = document.getElementById("arDetailNudgeWrap");
+  var arDetailNudgeInfo = document.getElementById("arDetailNudgeInfo");
+  var arDetailNudgePanel = document.getElementById("arDetailNudgePanel");
   var arGroupOverlay = document.getElementById("arGroupOverlay");
   var arGroupList = document.getElementById("arGroupList");
   var arGroupListClose = document.getElementById("arGroupListClose");
@@ -1084,11 +1286,31 @@
     arDetailBody.innerHTML = rows.join("");
     // 新增B(v3): 貨物記錄區塊(與地圖 popup 對等)，變更後重開卡片以同步
     arDetailBody.appendChild(buildCargoSection(pointId, function () { openArDetail(pointId); }));
+    arDetailNudgeWrap.classList.remove("open"); // 調整5: 每次開卡片先收合微調面板
     arDetailOverlay.classList.add("active");
   }
 
+  // 調整5: AR 詳情卡片位置微調(與地圖編輯模式共用 nudgePoint，資料/還原機制互通)
+  function updateArNudgeInfo(pointId) {
+    var p = byId(loadPoints(), pointId);
+    if (!p) return;
+    arDetailNudgeInfo.innerHTML = "座標：" + p.lat.toFixed(6) + ", " + p.lng.toFixed(6) +
+      "　狀態：" + (isPointEdited(p) ? "已修正" : "GPS 原始");
+  }
+  arDetailNudge.addEventListener("click", function () {
+    var id = viewState.openDetailPointId;
+    if (id == null) return;
+    var opening = !arDetailNudgeWrap.classList.contains("open");
+    arDetailNudgeWrap.classList.toggle("open");
+    if (opening) {
+      updateArNudgeInfo(id);
+      renderNudgeControls(arDetailNudgePanel, id, function () { updateArNudgeInfo(id); });
+    }
+  });
+
   function closeArDetail() {
     arDetailOverlay.classList.remove("active");
+    arDetailNudgeWrap.classList.remove("open");
     viewState.openDetailPointId = null;
   }
   arDetailClose.addEventListener("click", closeArDetail);
@@ -1398,7 +1620,9 @@
       var rel = normalizeRelative(brg, viewState.currentHeading);
       var inFov = Math.abs(rel) <= halfFov;
       var withinMax = dist <= maxDist;
-      var inView = inFov && withinMax; // 調整2(v2): 超過顯示距離的點不當作可顯示
+      // 調整4: 出貨模式篩選 —— 只疊加 active 貨物含指定顏色的地標(不影響診斷列表)
+      var passShip = (shippingColorHex == null) || cargoHasColor(p, shippingColorHex);
+      var inView = inFov && withinMax && passShip;
       var xPercent = 50 + (rel / halfFov) * 50;
 
       entries.push({ p: p, dist: dist, brg: brg, rel: rel, inView: inView, xPercent: xPercent });
@@ -1915,7 +2139,9 @@
         item.className = "cargo-item";
         var name = document.createElement("div");
         name.className = "cargo-item-name";
-        name.textContent = rec.name + (rec.quantity != null ? "　" + rec.quantity + (rec.unit || "") : (rec.unit ? "　" + rec.unit : ""));
+        name.innerHTML = (rec.colorHex ? "<span class='cargo-color-dot' style='background:" + rec.colorHex + "'></span>" : "") +
+          escapeHtml(rec.name + (rec.quantity != null ? "　" + rec.quantity + (rec.unit || "") : (rec.unit ? "　" + rec.unit : ""))) +
+          (rec.colorLabel ? "（" + escapeHtml(rec.colorLabel) + "）" : "");
         item.appendChild(name);
         var meta = document.createElement("div");
         meta.className = "cargo-item-meta";
@@ -1932,6 +2158,15 @@
         ship.textContent = "標記已出貨";
         ship.addEventListener("click", function () { shipCargo(pointId, rec.id, onChange); });
         item.appendChild(ship);
+        var moveBtn = document.createElement("button"); // 調整2: 移動到其他點
+        moveBtn.className = "cargo-move-btn";
+        moveBtn.textContent = "🔄 移動到其他點";
+        moveBtn.addEventListener("click", function () {
+          openPointPicker("把「" + rec.name + "」移動到：", pointId, function (toId) {
+            if (moveCargoRecord(pointId, rec.id, toId) && onChange) onChange();
+          });
+        });
+        item.appendChild(moveBtn);
         sec.appendChild(item);
       });
     }
@@ -2007,9 +2242,28 @@
   var cargoPhotoPreview = document.getElementById("cargoPhotoPreview");
   var cargoPhotoThumb = document.getElementById("cargoPhotoThumb");
   var cargoPhotoRemove = document.getElementById("cargoPhotoRemove");
+  var cargoColor = document.getElementById("cargoColor");
+  var cargoColorLabel = document.getElementById("cargoColorLabel");
+  var cargoRecentColors = document.getElementById("cargoRecentColors");
   var cargoModalTargetId = null;
   var cargoModalOnChange = null;
   var cargoModalPhoto = null;
+
+  // 調整4: 顯示最近使用顏色，點色塊快速套用
+  function buildRecentColorSwatches() {
+    cargoRecentColors.innerHTML = "";
+    loadRecentColors().forEach(function (c) {
+      var sw = document.createElement("div");
+      sw.className = "recent-swatch";
+      sw.style.background = c.colorHex;
+      sw.title = c.colorLabel || c.colorHex;
+      sw.addEventListener("click", function () {
+        cargoColor.value = c.colorHex;
+        cargoColorLabel.value = c.colorLabel || "";
+      });
+      cargoRecentColors.appendChild(sw);
+    });
+  }
 
   // Date → datetime-local 輸入值(本地時區 YYYY-MM-DDTHH:mm)
   function toLocalDatetimeValue(d) {
@@ -2035,6 +2289,8 @@
     cargoModalTargetId = pointId;
     cargoModalOnChange = onChange || null;
     cargoName.value = ""; cargoQty.value = ""; cargoUnit.value = ""; cargoNote.value = "";
+    cargoColor.value = DEFAULT_CARGO_COLOR; cargoColorLabel.value = "";
+    buildRecentColorSwatches();
     cargoArrived.value = toLocalDatetimeValue(new Date()); // 自動填當下，可手動改
     resetCargoPhotoUi();
     updateCargoModalButtons();
@@ -2075,8 +2331,11 @@
     var qtyRaw = cargoQty.value.trim();
     var qty = qtyRaw === "" ? null : parseFloat(qtyRaw);
     if (qty != null && isNaN(qty)) qty = null;
+    var colorHex = cargoColor.value || DEFAULT_CARGO_COLOR;
+    var colorLabel = cargoColorLabel.value.trim();
     var rec = {
       id: uid(), name: name, quantity: qty, unit: cargoUnit.value.trim() || null,
+      colorHex: colorHex, colorLabel: colorLabel || null,
       arrivedAt: cargoArrived.value ? new Date(cargoArrived.value).toISOString() : new Date().toISOString(),
       shippedAt: null, status: "active"
     };
@@ -2089,10 +2348,70 @@
     if (!p.cargoRecords) p.cargoRecords = [];
     p.cargoRecords.push(rec);
     saveWithCargoQuotaGuard(points, rec); // 空間滿時自動改存無照片版本，不讓整筆遺失
+    pushRecentColor(colorHex, colorLabel); // 調整4: 記住最近用色
     var cb = cargoModalOnChange;
     closeCargoModal();
     if (cb) cb();
   });
+
+  // ---------- 通用地標選擇清單(調整2 移動 / 調整3 新增選地標) ----------
+  var pointPickerOverlay = document.getElementById("pointPickerOverlay");
+  var pointPickerTitle = document.getElementById("pointPickerTitle");
+  var pointPickerList = document.getElementById("pointPickerList");
+  var pointPickerCancel = document.getElementById("pointPickerCancel");
+  // excludeId 排除某地標(移動時排除目前所在點)；onPick(toId) 選定後回呼
+  function openPointPicker(title, excludeId, onPick) {
+    pointPickerTitle.textContent = title;
+    pointPickerList.innerHTML = "";
+    var points = loadPoints().filter(function (p) { return p.id !== excludeId; });
+    if (points.length === 0) {
+      var empty = document.createElement("div");
+      empty.className = "picker-empty";
+      empty.textContent = "沒有可選的地標。";
+      pointPickerList.appendChild(empty);
+    } else {
+      points.forEach(function (p) {
+        var btn = document.createElement("button");
+        var n = activeCargo(p).length;
+        btn.textContent = p.label + (n > 0 ? "（📦 " + n + "）" : "");
+        btn.addEventListener("click", function () { closePointPicker(); onPick(p.id); });
+        pointPickerList.appendChild(btn);
+      });
+    }
+    pointPickerOverlay.classList.add("active");
+  }
+  function closePointPicker() { pointPickerOverlay.classList.remove("active"); }
+  pointPickerCancel.addEventListener("click", closePointPicker);
+  pointPickerOverlay.addEventListener("click", function (e) { if (e.target === pointPickerOverlay) closePointPicker(); });
+
+  // ---------- 出貨模式顏色選擇(調整4) ----------
+  var shipColorOverlay = document.getElementById("shipColorOverlay");
+  var shipColorList = document.getElementById("shipColorList");
+  var shipColorCancel = document.getElementById("shipColorCancel");
+  var shippingColorHex = null; // 目前出貨模式篩選中的顏色(null=未啟用)
+  function openShipColorPicker(onPick) {
+    shipColorList.innerHTML = "";
+    var colors = distinctActiveColors(loadPoints());
+    if (colors.length === 0) {
+      var empty = document.createElement("div");
+      empty.className = "picker-empty";
+      empty.textContent = "目前沒有任何在場貨物有顏色標籤。";
+      shipColorList.appendChild(empty);
+    } else {
+      colors.forEach(function (c) {
+        var btn = document.createElement("button");
+        var sw = document.createElement("span"); sw.className = "ship-swatch"; sw.style.background = c.colorHex;
+        var lbl = document.createElement("span"); lbl.textContent = (c.colorLabel || c.colorHex);
+        btn.appendChild(sw); btn.appendChild(lbl);
+        btn.addEventListener("click", function () { closeShipColorPicker(); onPick(c.colorHex); });
+        shipColorList.appendChild(btn);
+      });
+    }
+    shipColorOverlay.classList.add("active");
+  }
+  function closeShipColorPicker() { shipColorOverlay.classList.remove("active"); }
+  shipColorCancel.addEventListener("click", closeShipColorPicker);
+  shipColorOverlay.addEventListener("click", function (e) { if (e.target === shipColorOverlay) closeShipColorPicker(); });
 
   function renderMapMarkers() {
     mapMarkersLayer.clearLayers();
@@ -2100,6 +2419,8 @@
     mapMarkerRefs = [];
     var points = loadPoints();
     points.forEach(function (p) {
+      // 調整4: 出貨模式篩選 —— 只顯示 active 貨物含指定顏色的地標(僅影響顯示，不動資料)
+      if (shippingColorHex != null && !cargoHasColor(p, shippingColorHex)) return;
       // v3: 有在場貨物→貨物徽章圖示，否則一般藍色(量測模式維持預設藍以免與選取樣式混淆)
       var icon = measureModeActive ? new L.Icon.Default() : defaultIconFor(points, p);
       var marker = L.marker([p.lat, p.lng], { icon: icon });
@@ -2256,8 +2577,44 @@
     p.lat = newLat;
     p.lng = newLng;
     savePoints(points);
-    renderMapMarkers();
-    updateOffsetPanelInfo();
+    if (mapMarkersLayer) renderMapMarkers();           // 地圖已初始化才重繪(AR 呼叫時可能還沒進過地圖)
+    if (offsetPanelPointId === pointId) updateOffsetPanelInfo(); // 地圖微調面板同步
+    // AR 由 updateAR 迴圈自動反映新位置/距離
+  }
+
+  // 調整5: 通用微調控制(供 AR 詳情卡片重用地圖同一套 nudgePoint 邏輯)
+  function renderNudgeControls(container, pointId, onAfter) {
+    container.innerHTML = "";
+    var stepRow = document.createElement("div");
+    stepRow.className = "nudge-step-row";
+    function rebuildSteps() {
+      stepRow.innerHTML = "";
+      OFFSET_STEP_OPTIONS_M.forEach(function (step) {
+        var b = document.createElement("button");
+        b.textContent = step + "m";
+        if (step === offsetStepM) b.className = "active";
+        b.addEventListener("click", function () { offsetStepM = step; rebuildSteps(); });
+        stepRow.appendChild(b);
+      });
+    }
+    rebuildSteps();
+    var pad = document.createElement("div");
+    pad.className = "nudge-pad";
+    PAD_LAYOUT.forEach(function (dir) {
+      var cell = document.createElement("button");
+      if (dir === "center") { cell.className = "pad-center"; cell.textContent = "◎"; cell.disabled = true; }
+      else {
+        cell.textContent = PAD_ARROWS[dir];
+        cell.addEventListener("click", function () {
+          var v = OFFSET_DIRECTIONS[dir];
+          nudgePoint(pointId, v[0] * offsetStepM, v[1] * offsetStepM);
+          if (onAfter) onAfter();
+        });
+      }
+      pad.appendChild(cell);
+    });
+    container.appendChild(stepRow);
+    container.appendChild(pad);
   }
 
   // ---------- 調整3(v2): 聚合顯示開關 ----------
@@ -2319,6 +2676,126 @@
   btnSelectRecent.addEventListener("click", selectRecentPoints);
   btnSelectRecent.textContent = "🕐 選取最近 " + RECENT_SELECT_COUNT + " 筆";
   btnToggleCluster.addEventListener("click", function () { setClusterMode(!clusterModeActive); });
+
+  // ---------- 調整4: 出貨模式(地圖 + AR 共用同一個 shippingColorHex 狀態) ----------
+  var btnMapShipping = document.getElementById("btnMapShipping");
+  var btnViewShipping = document.getElementById("btnViewShipping");
+  function updateShippingButtons() {
+    var on = shippingColorHex != null;
+    var txt = on ? "🚚 出貨模式：" + shippingColorHex : "🚚 出貨模式：關閉";
+    btnMapShipping.textContent = txt;
+    btnViewShipping.textContent = txt;
+    if (on) { btnMapShipping.style.borderColor = shippingColorHex; btnViewShipping.style.borderColor = shippingColorHex; }
+    else { btnMapShipping.style.borderColor = ""; btnViewShipping.style.borderColor = ""; }
+  }
+  // 出貨模式的畫面刷新: 地圖重繪 markers(若地圖已初始化)；AR 由 updateAR 迴圈自動反映
+  function refreshShippingViews() {
+    if (leafletMap && mapMarkersLayer) renderMapMarkers();
+  }
+  function toggleShippingMode() {
+    if (shippingColorHex != null) { // 已開 → 關閉，恢復顯示全部
+      shippingColorHex = null;
+      updateShippingButtons();
+      refreshShippingViews();
+      return;
+    }
+    openShipColorPicker(function (hex) {
+      shippingColorHex = hex;
+      updateShippingButtons();
+      refreshShippingViews();
+    });
+  }
+  btnMapShipping.addEventListener("click", toggleShippingMode);
+  btnViewShipping.addEventListener("click", toggleShippingMode);
+
+  // ---------- 調整3: 商品頁籤 ----------
+  var productsList = document.getElementById("productsList");
+  var productsEmpty = document.getElementById("productsEmpty");
+  var filterLandmark = document.getElementById("filterLandmark");
+  var filterColor = document.getElementById("filterColor");
+  var btnAddCargoEntry = document.getElementById("btnAddCargoEntry");
+  var btnClearProductFilters = document.getElementById("btnClearProductFilters");
+
+  function rebuildProductFilters(points) {
+    var keepLand = filterLandmark.value, keepColor = filterColor.value;
+    filterLandmark.innerHTML = "<option value=''>全部</option>";
+    points.forEach(function (p) {
+      if (activeCargo(p).length === 0) return;
+      var o = document.createElement("option"); o.value = p.id; o.textContent = p.label;
+      filterLandmark.appendChild(o);
+    });
+    filterColor.innerHTML = "<option value=''>全部</option>";
+    distinctActiveColors(points).forEach(function (c) { // 與出貨模式共用同一顏色來源
+      var o = document.createElement("option"); o.value = c.colorHex;
+      o.textContent = (c.colorLabel ? c.colorLabel + " " : "") + c.colorHex;
+      filterColor.appendChild(o);
+    });
+    filterLandmark.value = keepLand; if (filterLandmark.value !== keepLand) filterLandmark.value = "";
+    filterColor.value = keepColor; if (filterColor.value !== keepColor) filterColor.value = "";
+  }
+
+  function renderProducts() {
+    var points = loadPoints();
+    rebuildProductFilters(points);
+    var landF = filterLandmark.value, colorF = filterColor.value;
+    var flat = allActiveCargoFlat(points).filter(function (e) {
+      if (landF && e.point.id !== landF) return false;
+      if (colorF && e.rec.colorHex !== colorF) return false;
+      return true;
+    });
+    productsList.innerHTML = "";
+    productsEmpty.style.display = flat.length === 0 ? "block" : "none";
+    flat.forEach(function (e) {
+      var rec = e.rec, p = e.point;
+      var item = document.createElement("div");
+      item.className = "product-item";
+      var head = document.createElement("div");
+      head.className = "product-head";
+      head.innerHTML = (rec.colorHex ? "<span class='cargo-color-dot' style='background:" + rec.colorHex + "'></span>" : "") +
+        escapeHtml(rec.name) + (rec.quantity != null ? "　" + rec.quantity + escapeHtml(rec.unit || "") : (rec.unit ? "　" + escapeHtml(rec.unit) : ""));
+      item.appendChild(head);
+      var meta = document.createElement("div");
+      meta.className = "product-meta";
+      meta.innerHTML = "地標：" + escapeHtml(p.label) + "<br>" +
+        (rec.colorLabel ? "顏色：" + escapeHtml(rec.colorLabel) + "<br>" : "") +
+        "進場：" + new Date(rec.arrivedAt).toLocaleString();
+      item.appendChild(meta);
+      var actions = document.createElement("div");
+      actions.className = "product-actions";
+      var shipBtn = document.createElement("button");
+      shipBtn.textContent = "標記已出貨";
+      shipBtn.addEventListener("click", function (ev) { ev.stopPropagation(); shipCargo(p.id, rec.id, renderProducts); });
+      var moveBtn = document.createElement("button");
+      moveBtn.textContent = "🔄 移動到其他點";
+      moveBtn.addEventListener("click", function (ev) {
+        ev.stopPropagation();
+        openPointPicker("把「" + rec.name + "」移動到：", p.id, function (toId) {
+          if (moveCargoRecord(p.id, rec.id, toId)) renderProducts();
+        });
+      });
+      actions.appendChild(shipBtn); actions.appendChild(moveBtn);
+      item.appendChild(actions);
+      head.addEventListener("click", function () { item.classList.toggle("expanded"); });
+      productsList.appendChild(item);
+    });
+  }
+
+  filterLandmark.addEventListener("change", renderProducts);
+  filterColor.addEventListener("change", renderProducts);
+  btnClearProductFilters.addEventListener("click", function () {
+    filterLandmark.value = ""; filterColor.value = ""; renderProducts();
+  });
+  btnAddCargoEntry.addEventListener("click", function () {
+    openPointPicker("選擇要新增貨物的地標：", null, function (pid) {
+      openCargoModal(pid, renderProducts);
+    });
+  });
+  // 供登記列表徽章跳轉：切到商品頁籤並套用該地標篩選
+  function gotoProductsForLandmark(pointId) {
+    switchTab("products");
+    filterLandmark.value = pointId;
+    renderProducts();
+  }
 
 })();
 </script>
