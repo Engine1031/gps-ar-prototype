@@ -99,14 +99,29 @@
   }
   /* 圖層本身不吃點擊(讓相機/空白處穿透)，只有標籤元素開啟 pointer-events 供點擊看詳情 */
   #overlayLayer { position: absolute; inset: 0; pointer-events: none; }
+  /* 熱區最小尺寸用 --min-touch(調整3)撐出，視覺文字大小獨立由距離分級 class 決定 */
   .marker {
     position: absolute; top: 42%; transform: translate(-50%, -50%);
-    background: rgba(0, 40, 20, 0.75); border: 2px solid #0f8; border-radius: 10px;
+    border: 2px solid #0f8; border-radius: 10px;
     padding: 6px 10px; color: #fff; font-size: 14px; font-weight: bold;
     white-space: nowrap; text-align: center; display: none;
     pointer-events: auto; cursor: pointer;
+    box-sizing: border-box; min-width: var(--min-touch, 50px); min-height: var(--min-touch, 50px);
+    flex-direction: column; align-items: center; justify-content: center;
   }
   .marker .marker-dist { display: block; font-size: 12px; font-weight: normal; color: #9f9; }
+
+  /* 距離分級樣式(調整1) —— 顏色/縮放可在此微調 */
+  .marker.dist-near { border-color: #0f8; background: rgba(0, 40, 20, 0.78); color: #fff; font-size: 14px; }
+  .marker.dist-mid  { border-color: #fc0; background: rgba(50, 42, 0, 0.78); color: #ffe9a8; font-size: 12px; } /* ≈近的85% */
+  .marker.dist-far  { border-color: #999; background: rgba(30, 30, 30, 0.72); color: #ddd; opacity: 0.6; font-size: 10px; } /* ≈近的70% */
+  .marker.dist-near .marker-dist { color: #9f9; }
+  .marker.dist-mid  .marker-dist { color: #fe8; }
+  .marker.dist-far  .marker-dist { color: #bbb; }
+
+  /* 群組標籤(調整2) —— 藍色底色區分，尺寸比照近距離 */
+  .marker.marker-group { border-color: #4af; background: rgba(0, 25, 55, 0.88); color: #fff; font-size: 14px; }
+  .marker.marker-group .marker-dist { color: #9cf; }
 
   /* ---------- AR 標籤詳情卡片 ---------- */
   #arDetailCard {
@@ -116,10 +131,6 @@
     padding: 16px; display: none;
   }
   #arDetailCard.active { display: block; }
-  #arDetailClose {
-    width: 100%; padding: 12px; margin-bottom: 12px; font-size: 16px; font-weight: bold;
-    background: #333; color: #fff; border: 1px solid #666; border-radius: 8px; cursor: pointer;
-  }
   #arDetailBody h3 { margin: 0 0 10px; font-size: 20px; color: #0f8; }
   .ar-detail-row {
     display: flex; justify-content: space-between; gap: 10px;
@@ -130,6 +141,36 @@
   .ar-detail-photo {
     display: block; width: 100%; margin-top: 12px; border-radius: 8px; border: 1px solid #444;
   }
+  /* 詳情卡片操作列(調整4)：改名稱/刪除/關閉，熱區 ≥ --min-touch(調整3) */
+  #arDetailActions { display: flex; gap: 8px; margin-top: 14px; }
+  #arDetailActions button {
+    flex: 1; box-sizing: border-box; min-height: var(--min-touch, 50px); padding: 10px 4px;
+    font-size: 14px; font-weight: bold; border-radius: 8px; cursor: pointer; border: 1px solid #666;
+  }
+  #arDetailRename { background: #245; color: #fff; }
+  #arDetailDelete { background: #622; color: #fff; border-color: #944; }
+  #arDetailClose  { background: #333; color: #fff; }
+
+  /* ---------- AR 群組清單彈窗(調整2) ---------- */
+  #arGroupList {
+    position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+    z-index: 30; width: 88%; max-width: 340px; max-height: 80vh; overflow-y: auto;
+    background: rgba(5, 15, 30, 0.96); border: 2px solid #4af; border-radius: 14px;
+    padding: 16px; display: none;
+  }
+  #arGroupList.active { display: block; }
+  #arGroupListClose {
+    width: 100%; box-sizing: border-box; min-height: var(--min-touch, 50px); padding: 12px; margin-bottom: 12px;
+    font-size: 16px; font-weight: bold; background: #333; color: #fff; border: 1px solid #666; border-radius: 8px; cursor: pointer;
+  }
+  .group-list-header { color: #9cf; font-size: 15px; font-weight: bold; margin-bottom: 10px; }
+  .group-list-item {
+    display: flex; justify-content: space-between; align-items: center; gap: 10px; width: 100%;
+    box-sizing: border-box; min-height: var(--min-touch, 50px); padding: 10px 12px; margin-bottom: 8px;
+    font-size: 15px; font-weight: bold; text-align: left;
+    background: #1a2333; color: #fff; border: 1px solid #456; border-radius: 8px; cursor: pointer;
+  }
+  .group-list-item .group-list-dist { color: #9cf; font-weight: normal; flex: 0 0 auto; }
 
   #viewTopBar {
     position: absolute; top: 0; left: 0; right: 0; z-index: 5;
@@ -269,8 +310,28 @@
     <div id="orientationWarning">⚠️ 非絕對方位資料，方向可能不準確</div>
 
     <div id="arDetailCard">
-      <button id="arDetailClose">✕ 關閉</button>
       <div id="arDetailBody"></div>
+      <div id="arDetailActions">
+        <button id="arDetailRename">✏️ 改名稱</button>
+        <button id="arDetailDelete">🗑️ 刪除</button>
+        <button id="arDetailClose">✕ 關閉</button>
+      </div>
+    </div>
+
+    <div id="arGroupList">
+      <button id="arGroupListClose">✕ 關閉</button>
+      <div id="arGroupListBody"></div>
+    </div>
+
+    <div id="renameModalOverlay" class="modal-overlay">
+      <div class="modal-box">
+        <div class="modal-coords">修改地標名稱（只改名稱，不重新定位）</div>
+        <input id="renameModalInput" type="text" class="modal-input" placeholder="請輸入新的名稱">
+        <div class="modal-actions">
+          <button id="renameModalCancel">取消</button>
+          <button id="renameModalConfirm" disabled>請輸入名稱</button>
+        </div>
+      </div>
     </div>
 
     <div id="viewTopBar">
@@ -308,7 +369,7 @@
   "use strict";
 
   var STORAGE_KEY = "gpsArPoints_v1";
-  var APP_VERSION = "1.8.0"; // 每次改版記得同步更新
+  var APP_VERSION = "1.9.0"; // 每次改版記得同步更新
 
   // ---- 可調參數 ----
   var AR_RENDER_THROTTLE_MS = 150;             // 修正1: updateAR() 畫面重繪節流間隔(ms)
@@ -323,8 +384,14 @@
   var RECENT_SELECT_COUNT = 5;        // 編輯模式: 「選取最近 N 筆」一鍵選取的數量
   var PHOTO_MAX_EDGE = 800;           // 調整2: 拍照壓縮 —— 長邊縮到此像素
   var PHOTO_JPEG_QUALITY = 0.6;       // 調整2: 拍照壓縮 —— JPEG 輸出品質
+  // ---- AR 標籤分級/分群/熱區 可調參數 ----
+  var DISTANCE_NEAR_THRESHOLD_M = 20;    // 調整1: 近距離門檻(公尺)
+  var DISTANCE_MID_THRESHOLD_M = 50;     // 調整1: 中距離門檻(公尺)
+  var DENSITY_GROUP_ANGLE_THRESHOLD = 3; // 調整2: 相對夾角差 < 此值(度)歸為同一群組
+  var MIN_TOUCH_TARGET_PX = 50;          // 調整3: 可點擊元素最小熱區(px)
 
   document.getElementById("appVersion").textContent = "v" + APP_VERSION;
+  document.documentElement.style.setProperty("--min-touch", MIN_TOUCH_TARGET_PX + "px"); // 調整3: 供 CSS 用
 
   function uid() {
     return Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 8);
@@ -411,6 +478,8 @@
     Object.keys(screens).forEach(function (k) { screens[k].classList.toggle("active", k === name); });
     if (name !== "view") stopViewMode();
     if (name === "map") enterMapTab();
+    // 切回登記模式時重讀 localStorage 重繪列表，反映 AR 改名稱/刪除等變更(調整4)
+    if (name === "register") renderPointList();
   }
   tabBtns.forEach(function (b) {
     b.addEventListener("click", function () { switchTab(b.dataset.tab); });
@@ -822,6 +891,15 @@
   var arDetailCard = document.getElementById("arDetailCard");
   var arDetailClose = document.getElementById("arDetailClose");
   var arDetailBody = document.getElementById("arDetailBody");
+  var arDetailRename = document.getElementById("arDetailRename");
+  var arDetailDelete = document.getElementById("arDetailDelete");
+  var arGroupList = document.getElementById("arGroupList");
+  var arGroupListClose = document.getElementById("arGroupListClose");
+  var arGroupListBody = document.getElementById("arGroupListBody");
+  var renameModalOverlay = document.getElementById("renameModalOverlay");
+  var renameModalInput = document.getElementById("renameModalInput");
+  var renameModalConfirm = document.getElementById("renameModalConfirm");
+  var renameModalCancel = document.getElementById("renameModalCancel");
 
   var viewState = {
     stream: null,
@@ -839,9 +917,18 @@
     gotAbsolute: false,
     gotIosCompass: false,
     markerEls: {},
+    groupEls: [],          // 調整2: 群組標籤 DOM 元素池(依畫面上群組數量重用)
     orientationHandlersAttached: false,
-    openDetailPointId: null // 調整3: 目前打開詳情卡片的登記點 id(null 表示未開)
+    openDetailPointId: null,   // 詳情卡片目前對應的登記點 id(null 表示未開)
+    openGroupMemberIds: null   // 調整2: 群組清單彈窗目前列出的成員 id 陣列(null 表示未開)
   };
+
+  // 調整1: 依距離回傳分級樣式 class
+  function distanceClass(dist) {
+    if (dist < DISTANCE_NEAR_THRESHOLD_M) return "dist-near";
+    if (dist < DISTANCE_MID_THRESHOLD_M) return "dist-mid";
+    return "dist-far";
+  }
 
   // 調整3: 點擊 AR 標籤打開詳情卡片。距離在 updateAR() 每幀更新(見 #arDetailDist)，
   // 其餘欄位為打開當下的快照；卡片保留直列式排版供之後擴充。
@@ -866,6 +953,104 @@
     viewState.openDetailPointId = null;
   }
   arDetailClose.addEventListener("click", closeArDetail);
+
+  // ---------- 調整2: 群組清單彈窗 ----------
+  function ensureGroupEl(index) {
+    var el = viewState.groupEls[index];
+    if (!el) {
+      el = document.createElement("div");
+      el.className = "marker marker-group";
+      el.addEventListener("click", function () {
+        if (el._groupMemberIds && el._groupMemberIds.length) openGroupList(el._groupMemberIds);
+      });
+      overlayLayer.appendChild(el);
+      viewState.groupEls[index] = el;
+    }
+    return el;
+  }
+
+  function openGroupList(ids) {
+    viewState.openGroupMemberIds = ids.slice();
+    var pts = loadPoints();
+    arGroupListBody.innerHTML = "";
+    var header = document.createElement("div");
+    header.className = "group-list-header";
+    header.textContent = "此方向共 " + ids.length + " 個地標，點選查看詳情";
+    arGroupListBody.appendChild(header);
+    ids.forEach(function (id) {
+      var p = pts.filter(function (x) { return x.id === id; })[0];
+      if (!p) return;
+      var item = document.createElement("button");
+      item.className = "group-list-item";
+      item.dataset.pointId = id;
+      item.innerHTML = "<span class='group-list-label'>" + escapeHtml(p.label) +
+        "</span><span class='group-list-dist'>計算中...</span>";
+      item.addEventListener("click", function () { openGroupItem(id); });
+      arGroupListBody.appendChild(item);
+    });
+    arGroupList.classList.add("active");
+  }
+
+  function closeGroupList() {
+    arGroupList.classList.remove("active");
+    viewState.openGroupMemberIds = null;
+  }
+
+  // 點清單項目 → 關清單、開該點詳情卡片
+  function openGroupItem(id) {
+    closeGroupList();
+    openArDetail(id);
+  }
+  arGroupListClose.addEventListener("click", closeGroupList);
+
+  // ---------- 調整4: 改名稱 / 刪除 ----------
+  function updateRenameButtons() {
+    var has = renameModalInput.value.trim().length > 0;
+    renameModalConfirm.disabled = !has;
+    renameModalConfirm.textContent = has ? "確認" : "請輸入名稱";
+  }
+  function openRenameModal() {
+    var id = viewState.openDetailPointId;
+    if (id == null) return;
+    var p = loadPoints().filter(function (x) { return x.id === id; })[0];
+    if (!p) return;
+    renameModalInput.value = p.label;
+    updateRenameButtons();
+    renameModalOverlay.classList.add("active");
+    renameModalInput.focus();
+    renameModalInput.select();
+  }
+  function closeRenameModal() { renameModalOverlay.classList.remove("active"); }
+
+  renameModalInput.addEventListener("input", updateRenameButtons);
+  renameModalInput.addEventListener("keydown", function (e) {
+    if (e.key === "Enter" && !renameModalConfirm.disabled) renameModalConfirm.click();
+  });
+  renameModalConfirm.addEventListener("click", function () {
+    var id = viewState.openDetailPointId;
+    var newLabel = renameModalInput.value.trim();
+    if (!newLabel || id == null) return;
+    var points = loadPoints();
+    points.forEach(function (x) { if (x.id === id) x.label = newLabel; }); // 只改 label，不動座標/取樣
+    savePoints(points);
+    closeRenameModal();
+    var h3 = arDetailBody.querySelector("h3"); // 卡片標題同步更新(AR 標籤下一幀自動更新)
+    if (h3) h3.textContent = newLabel;
+  });
+  renameModalCancel.addEventListener("click", closeRenameModal);
+  arDetailRename.addEventListener("click", openRenameModal);
+
+  arDetailDelete.addEventListener("click", function () {
+    var id = viewState.openDetailPointId;
+    if (id == null) return;
+    var p = loadPoints().filter(function (x) { return x.id === id; })[0];
+    if (!p) return;
+    if (!window.confirm("確定刪除『" + p.label + "』這個地標？此動作無法復原")) return;
+    savePoints(loadPoints().filter(function (x) { return x.id !== id; }));
+    closeArDetail();
+    closeGroupList(); // 若是從清單點進來的，一併關閉
+    // AR 標籤下一幀由 cleanupMarkerEls 自動移除；地圖/登記列表下次切換頁籤重讀 localStorage 反映
+  });
 
   // 修正2: 收到新的原始羅盤讀數時，先做圓周平滑再寫入 currentHeading。
   // 來源切換(例如從 fallback 換成絕對方位)時清空緩衝區，避免不同來源的角度混在一起平均。
@@ -1045,15 +1230,13 @@
     var validIds = [];
     var entries = [];
 
-    // 第一階段：只計算每個點的方位角/距離/相對夾角，先不動 DOM，
-    // 因為修正3的重疊避讓要等全部算完、依水平位置排序後才能決定要不要垂直錯開。
+    // 第一階段：計算每個點的方位角/距離/相對夾角(先不動 DOM)，並產生每點的診斷行。
     points.forEach(function (p) {
       validIds.push(p.id);
-      var el = ensureMarkerEl(p);
+      ensureMarkerEl(p); // 確保元素存在(供分群時取用/隱藏)
       var regAccuracyText = "登記時精度 ±" + (p.accuracy != null ? p.accuracy.toFixed(1) : "?") + "m";
 
       if (!viewState.currentPosition || viewState.currentHeading == null) {
-        el.style.display = "none";
         diagLines.push(p.label + ": 等待 GPS/方位資料... (" + regAccuracyText + ")");
         return;
       }
@@ -1068,46 +1251,84 @@
       var inView = Math.abs(rel) <= halfFov;
       var xPercent = 50 + (rel / halfFov) * 50;
 
-      entries.push({
-        p: p, el: el, dist: dist, brg: brg, rel: rel, inView: inView,
-        xPercent: xPercent, regAccuracyText: regAccuracyText, verticalOffset: 0
-      });
-    });
-
-    // 修正3：標籤重疊碰撞避讓 —— 依水平位置排序，同一水平叢集內的標籤逐級往下錯開。
-    // 用「累加階層」而非二值交錯：3 個以上幾乎同位的標籤會排成 0/60/120px 而非 0/60/0，
-    // 確保沒有兩個水平重疊的標籤落在同一列，點擊時才能穩定命中畫面上看到的那一個(調整3)。
-    var visible = entries.filter(function (e) { return e.inView; });
-    visible.sort(function (a, b) { return a.xPercent - b.xPercent; });
-    var prevX = null;
-    var stackLevel = 0;
-    visible.forEach(function (entry) {
-      if (prevX !== null && Math.abs(entry.xPercent - prevX) < LABEL_COLLISION_THRESHOLD_PERCENT) {
-        stackLevel += 1;
-      } else {
-        stackLevel = 0;
-      }
-      entry.verticalOffset = stackLevel * LABEL_COLLISION_OFFSET_PX;
-      prevX = entry.xPercent;
-    });
-
-    // 第二階段：套用到固定的 DOM 節點（每個登記點只有一個節點，重複使用，只改 style/文字）
-    entries.forEach(function (entry) {
-      var el = entry.el;
-      if (entry.inView) {
-        el.style.left = entry.xPercent + "%";
-        el.style.top = "calc(42% + " + entry.verticalOffset + "px)";
-        el.style.display = "block";
-        el.innerHTML = escapeHtml(entry.p.label) + "<span class='marker-dist'>" + entry.dist.toFixed(1) + " m</span>";
-      } else {
-        el.style.display = "none";
-      }
+      entries.push({ p: p, dist: dist, brg: brg, rel: rel, inView: inView, xPercent: xPercent });
       diagLines.push(
-        entry.p.label + ": bearing=" + entry.brg.toFixed(1) + "° dist=" + entry.dist.toFixed(1) + "m rel=" + entry.rel.toFixed(1) +
-        "° inView=" + (entry.inView ? "YES" : "no") + " (" + entry.regAccuracyText + ")"
+        p.label + ": bearing=" + brg.toFixed(1) + "° dist=" + dist.toFixed(1) + "m rel=" + rel.toFixed(1) +
+        "° inView=" + (inView ? "YES" : "no") + " (" + regAccuracyText + ")"
       );
     });
+
+    // 先把所有單點標籤元素隱藏，稍後只顯示「單點群組」用到的那些
+    Object.keys(viewState.markerEls).forEach(function (id) { viewState.markerEls[id].style.display = "none"; });
+
+    // 調整2：密度分群 —— 依相對夾角排序，相鄰夾角差 < DENSITY_GROUP_ANGLE_THRESHOLD 的點歸為同群
+    var visible = entries.filter(function (e) { return e.inView; });
+    visible.sort(function (a, b) { return a.rel - b.rel; });
+    var groups = [];
+    visible.forEach(function (e) {
+      var last = groups[groups.length - 1];
+      if (last && (e.rel - last[last.length - 1].rel) < DENSITY_GROUP_ANGLE_THRESHOLD) {
+        last.push(e);
+      } else {
+        groups.push([e]);
+      }
+    });
+
+    // 每個群組成一個「渲染單位」，位置取群組成員的水平平均
+    var units = groups.map(function (g) {
+      var meanX = g.reduce(function (s, e) { return s + e.xPercent; }, 0) / g.length;
+      return { members: g, xPercent: meanX, verticalOffset: 0 };
+    });
+
+    // 修正3/調整2：對「渲染單位」(單點或群組)依水平位置做碰撞錯開，逐級往下堆疊避免彼此重疊
+    units.sort(function (a, b) { return a.xPercent - b.xPercent; });
+    var prevX = null, stackLevel = 0;
+    units.forEach(function (u) {
+      if (prevX !== null && Math.abs(u.xPercent - prevX) < LABEL_COLLISION_THRESHOLD_PERCENT) stackLevel += 1;
+      else stackLevel = 0;
+      u.verticalOffset = stackLevel * LABEL_COLLISION_OFFSET_PX;
+      prevX = u.xPercent;
+    });
+
+    // 渲染：單點群組用該點自己的標籤元素(含距離分級)，多點群組用群組元素池
+    var groupIndex = 0;
+    units.forEach(function (u) {
+      var topCss = "calc(42% + " + u.verticalOffset + "px)";
+      if (u.members.length === 1) {
+        var e = u.members[0];
+        var el = viewState.markerEls[e.p.id];
+        el.className = "marker " + distanceClass(e.dist); // 調整1: 距離分級
+        el.style.left = u.xPercent + "%";
+        el.style.top = topCss;
+        el.style.display = "flex";
+        el.innerHTML = "<span class='marker-label'>" + escapeHtml(e.p.label) + "</span>" +
+          "<span class='marker-dist'>" + e.dist.toFixed(1) + " m</span>";
+      } else {
+        var gel = ensureGroupEl(groupIndex++);
+        gel._groupMemberIds = u.members.map(function (m) { return m.p.id; });
+        gel.style.left = u.xPercent + "%";
+        gel.style.top = topCss;
+        gel.style.display = "flex";
+        gel.innerHTML = "<span class='marker-label'>📍 此方向</span>" +
+          "<span class='marker-dist'>" + u.members.length + " 個點</span>";
+      }
+    });
+    // 隱藏本幀沒用到的群組元素
+    for (var gi = groupIndex; gi < viewState.groupEls.length; gi++) viewState.groupEls[gi].style.display = "none";
+    diagLines.push("--- 顯示單位: " + units.length + " (畫面內 " + visible.length + " 點) ---");
+
     cleanupMarkerEls(validIds);
+
+    // 調整2: 群組清單彈窗開啟時，即時更新每個成員的距離
+    if (viewState.openGroupMemberIds) {
+      viewState.openGroupMemberIds.forEach(function (id) {
+        var item = arGroupListBody.querySelector("[data-point-id='" + id + "']");
+        if (!item) return;
+        var span = item.querySelector(".group-list-dist");
+        var m = entries.filter(function (e) { return e.p.id === id; })[0];
+        if (span) span.textContent = (m && viewState.currentPosition) ? m.dist.toFixed(1) + " m" : "無法計算";
+      });
+    }
 
     // 調整3: 詳情卡片打開期間，背景標籤持續更新，卡片上的「目前距離」也一起即時更新
     if (viewState.openDetailPointId != null) {
@@ -1176,7 +1397,11 @@
       overlayLayer.removeChild(viewState.markerEls[id]);
     });
     viewState.markerEls = {};
-    closeArDetail(); // 調整3: 離開檢視模式時關閉詳情卡片
+    viewState.groupEls.forEach(function (el) { if (el.parentNode) overlayLayer.removeChild(el); }); // 調整2: 清群組元素
+    viewState.groupEls = [];
+    closeArDetail();     // 離開檢視模式時關閉詳情卡片
+    closeGroupList();    // 調整2: 關閉群組清單
+    closeRenameModal();  // 調整4: 關閉改名稱輸入框
     startOverlay.style.display = "flex";
     diagnostics.textContent = "初始化中...";
   }
