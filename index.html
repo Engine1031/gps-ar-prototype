@@ -5,6 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
 <title>GPS AR 定點實驗</title>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css">
+<link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css">
 <style>
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
   html, body {
@@ -123,14 +125,19 @@
   .marker.marker-group { border-color: #4af; background: rgba(0, 25, 55, 0.88); color: #fff; font-size: 14px; }
   .marker.marker-group .marker-dist { color: #9cf; }
 
+  /* ---------- AR 彈窗背景(調整1: 點半透明背景可關閉) ---------- */
+  .ar-overlay {
+    position: absolute; inset: 0; z-index: 30; display: none;
+    align-items: center; justify-content: center; padding: 16px;
+    background: rgba(0, 0, 0, 0.55);
+  }
+  .ar-overlay.active { display: flex; }
+
   /* ---------- AR 標籤詳情卡片 ---------- */
   #arDetailCard {
-    position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
-    z-index: 30; width: 88%; max-width: 340px; max-height: 80vh; overflow-y: auto;
-    background: rgba(10, 20, 15, 0.96); border: 2px solid #0f8; border-radius: 14px;
-    padding: 16px; display: none;
+    width: 88%; max-width: 340px; max-height: 80vh; overflow-y: auto;
+    background: rgba(10, 20, 15, 0.96); border: 2px solid #0f8; border-radius: 14px; padding: 16px;
   }
-  #arDetailCard.active { display: block; }
   #arDetailBody h3 { margin: 0 0 10px; font-size: 20px; color: #0f8; }
   .ar-detail-row {
     display: flex; justify-content: space-between; gap: 10px;
@@ -153,12 +160,9 @@
 
   /* ---------- AR 群組清單彈窗(調整2) ---------- */
   #arGroupList {
-    position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
-    z-index: 30; width: 88%; max-width: 340px; max-height: 80vh; overflow-y: auto;
-    background: rgba(5, 15, 30, 0.96); border: 2px solid #4af; border-radius: 14px;
-    padding: 16px; display: none;
+    width: 88%; max-width: 340px; max-height: 80vh; overflow-y: auto;
+    background: rgba(5, 15, 30, 0.96); border: 2px solid #4af; border-radius: 14px; padding: 16px;
   }
-  #arGroupList.active { display: block; }
   #arGroupListClose {
     width: 100%; box-sizing: border-box; min-height: var(--min-touch, 50px); padding: 12px; margin-bottom: 12px;
     font-size: 16px; font-weight: bold; background: #333; color: #fff; border: 1px solid #666; border-radius: 8px; cursor: pointer;
@@ -251,6 +255,61 @@
   }
   .popup-edited-flag { color: #c60; font-weight: bold; font-size: 12px; }
 
+  /* ---------- 主點/子點(調整4 v2) ---------- */
+  #btnToggleCluster { }
+  /* 地圖 marker 樣式區分：子點橘色圓、父點金色星框 */
+  .child-marker-inner {
+    width: 20px; height: 20px; border-radius: 50%;
+    background: #ff8c1a; border: 2px solid #fff; box-shadow: 0 0 6px rgba(255,140,26,0.9);
+  }
+  .parent-marker-inner {
+    width: 22px; height: 22px; border-radius: 50%;
+    background: #1a73e8; border: 3px solid #ffd23f; box-shadow: 0 0 8px rgba(255,210,63,0.9);
+    display: flex; align-items: center; justify-content: center; font-size: 12px;
+  }
+  .parent-marker-inner::after { content: "★"; color: #ffd23f; }
+  /* 子點列表徽章 */
+  .point-badge { font-size: 12px; font-weight: bold; padding: 1px 6px; border-radius: 6px; margin-left: 6px; }
+  .point-badge.child { background: #6a3500; color: #ffcc99; }
+  .point-badge.parent { background: #3a3200; color: #ffe680; }
+  .point-actions { display: flex; flex-direction: column; gap: 6px; flex: 0 0 auto; }
+  .anchor-btn {
+    background: #245; color: #fff; border: 1px solid #567; border-radius: 8px;
+    padding: 8px 10px; font-size: 13px; font-weight: bold; cursor: pointer;
+  }
+  #parentPickerList { max-height: 40vh; overflow-y: auto; margin-bottom: 12px; }
+  #parentPickerList button {
+    display: block; width: 100%; box-sizing: border-box; min-height: var(--min-touch, 50px);
+    text-align: left; padding: 10px 12px; margin-bottom: 6px; font-size: 15px; font-weight: bold;
+    background: #1a2333; color: #fff; border: 1px solid #456; border-radius: 8px; cursor: pointer;
+  }
+  #parentPickerList .picker-empty { color: #999; font-size: 14px; padding: 12px 0; }
+
+  /* 8 方向偏移調整面板(調整4 v2) */
+  #offsetPanel {
+    position: absolute; left: 8px; bottom: 8px; z-index: 600; display: none;
+    background: rgba(0,0,0,0.85); border: 1px solid #567; border-radius: 12px; padding: 12px; width: 240px;
+  }
+  #offsetPanel.active { display: block; }
+  #offsetPanelInfo { color: #ffcc99; font-size: 13px; line-height: 1.5; margin-bottom: 8px; }
+  #offsetStepRow { display: flex; gap: 6px; margin-bottom: 8px; }
+  #offsetStepRow button {
+    flex: 1; padding: 8px 0; font-size: 13px; font-weight: bold; cursor: pointer;
+    background: #223; color: #fff; border: 1px solid #456; border-radius: 6px;
+  }
+  #offsetStepRow button.active { background: #ff8c1a; color: #000; border-color: #ff8c1a; }
+  #offsetPad { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin-bottom: 8px; }
+  #offsetPad button {
+    box-sizing: border-box; min-width: var(--min-touch, 50px); min-height: var(--min-touch, 50px);
+    font-size: 18px; font-weight: bold; cursor: pointer;
+    background: #234; color: #fff; border: 1px solid #567; border-radius: 8px;
+  }
+  #offsetPad .pad-center { background: transparent; border: none; color: #789; font-size: 12px; cursor: default; }
+  #offsetPanelClose {
+    width: 100%; box-sizing: border-box; min-height: var(--min-touch, 50px); padding: 10px;
+    font-size: 14px; font-weight: bold; background: #333; color: #fff; border: 1px solid #666; border-radius: 8px; cursor: pointer;
+  }
+
   /* ---------- 版本號 ---------- */
   #appVersion {
     position: fixed; left: 6px; bottom: 4px; z-index: 9999;
@@ -309,18 +368,22 @@
     <div id="overlayLayer"></div>
     <div id="orientationWarning">⚠️ 非絕對方位資料，方向可能不準確</div>
 
-    <div id="arDetailCard">
-      <div id="arDetailBody"></div>
-      <div id="arDetailActions">
-        <button id="arDetailRename">✏️ 改名稱</button>
-        <button id="arDetailDelete">🗑️ 刪除</button>
-        <button id="arDetailClose">✕ 關閉</button>
+    <div id="arDetailOverlay" class="ar-overlay">
+      <div id="arDetailCard">
+        <div id="arDetailBody"></div>
+        <div id="arDetailActions">
+          <button id="arDetailRename">✏️ 改名稱</button>
+          <button id="arDetailDelete">🗑️ 刪除</button>
+          <button id="arDetailClose">✕ 關閉</button>
+        </div>
       </div>
     </div>
 
-    <div id="arGroupList">
-      <button id="arGroupListClose">✕ 關閉</button>
-      <div id="arGroupListBody"></div>
+    <div id="arGroupOverlay" class="ar-overlay">
+      <div id="arGroupList">
+        <button id="arGroupListClose">✕ 關閉</button>
+        <div id="arGroupListBody"></div>
+      </div>
     </div>
 
     <div id="renameModalOverlay" class="modal-overlay">
@@ -340,6 +403,10 @@
         <label for="fovInput">FOV°</label>
         <input id="fovInput" type="number" value="65" min="20" max="120" step="1">
       </div>
+      <div id="fovWrap">
+        <label for="maxDistInput">顯示距離(m)</label>
+        <input id="maxDistInput" type="number" value="150" min="5" max="5000" step="5">
+      </div>
     </div>
 
     <div id="diagnostics">初始化中...</div>
@@ -354,9 +421,27 @@
       <button id="btnClearMeasure">🧹 清除量測</button>
       <button id="btnToggleEditMode">✏️ 編輯模式：關閉</button>
       <button id="btnSelectRecent">🕐 選取最近 5 筆</button>
+      <button id="btnToggleCluster">🔗 聚合顯示：關閉</button>
       <div id="mapStatus"></div>
     </div>
     <div id="measureResultBar"></div>
+
+    <div id="offsetPanel">
+      <div id="offsetPanelInfo"></div>
+      <div id="offsetStepRow"></div>
+      <div id="offsetPad"></div>
+      <button id="offsetPanelClose">關閉調整面板</button>
+    </div>
+
+    <div id="parentPickerOverlay" class="modal-overlay">
+      <div class="modal-box">
+        <div class="modal-coords">選擇要掛在哪個主點底下</div>
+        <div id="parentPickerList"></div>
+        <div class="modal-actions">
+          <button id="parentPickerCancel">取消</button>
+        </div>
+      </div>
+    </div>
   </div>
 
 </div>
@@ -364,12 +449,13 @@
 <div id="appVersion"></div>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
 <script>
 (function () {
   "use strict";
 
   var STORAGE_KEY = "gpsArPoints_v1";
-  var APP_VERSION = "1.9.0"; // 每次改版記得同步更新
+  var APP_VERSION = "2.0.0"; // 每次改版記得同步更新
 
   // ---- 可調參數 ----
   var AR_RENDER_THROTTLE_MS = 150;             // 修正1: updateAR() 畫面重繪節流間隔(ms)
@@ -389,6 +475,9 @@
   var DISTANCE_MID_THRESHOLD_M = 50;     // 調整1: 中距離門檻(公尺)
   var DENSITY_GROUP_ANGLE_THRESHOLD = 3; // 調整2: 相對夾角差 < 此值(度)歸為同一群組
   var MIN_TOUCH_TARGET_PX = 50;          // 調整3: 可點擊元素最小熱區(px)
+  var MAX_DISPLAY_DISTANCE_M = 150;      // 調整2(v2): AR 超過此距離不顯示標籤(診斷仍列出)
+  var OFFSET_STEP_OPTIONS_M = [0.1, 0.5, 1, 2]; // 調整4(v2): 子點 8 方向調整的步進值選項(m)
+  var OFFSET_STEP_DEFAULT_M = 0.5;       // 調整4(v2): 預設步進值
 
   document.getElementById("appVersion").textContent = "v" + APP_VERSION;
   document.documentElement.style.setProperty("--min-touch", MIN_TOUCH_TARGET_PX + "px"); // 調整3: 供 CSS 用
@@ -463,6 +552,56 @@
     });
     var meanDeg = toDeg(Math.atan2(sumSin / anglesDeg.length, sumCos / anglesDeg.length));
     return (meanDeg + 360) % 360;
+  }
+
+  // ===================== 主點/子點 helpers(調整4 v2) =====================
+  function byId(points, id) {
+    for (var i = 0; i < points.length; i++) if (points[i].id === id) return points[i];
+    return null;
+  }
+  function isChild(p) { return p && p.parentId != null; }
+  function childrenOf(points, parentId) {
+    return points.filter(function (x) { return x.parentId === parentId; });
+  }
+  function hasChildren(points, id) {
+    return points.some(function (x) { return x.parentId === id; });
+  }
+  // 換算子點絕對座標(小範圍近似，與 haversine 精神一致)
+  function computeChildLatLng(parentLat, parentLng, offsetEast, offsetNorth) {
+    return {
+      lat: parentLat + offsetNorth / 111320,
+      lng: parentLng + offsetEast / (111320 * Math.cos(toRad(parentLat)))
+    };
+  }
+  // 父點座標改變後，重算其所有子點的絕對座標(offset 不變，整體平移)
+  function recomputeChildrenLatLng(points, parentId) {
+    var parent = byId(points, parentId);
+    if (!parent) return;
+    points.forEach(function (c) {
+      if (c.parentId !== parentId) return;
+      var ll = computeChildLatLng(parent.lat, parent.lng, c.offsetEast || 0, c.offsetNorth || 0);
+      c.lat = ll.lat;
+      c.lng = ll.lng;
+    });
+  }
+  // 一批點被移動後(拖曳合併)，維持父子關係一致：父點→子點跟著平移；子點→依新座標回推 offset
+  function reconcileAfterMove(points, movedIds) {
+    movedIds.forEach(function (id) {
+      var p = byId(points, id);
+      if (p && !isChild(p)) recomputeChildrenLatLng(points, id);
+    });
+    movedIds.forEach(function (id) {
+      var c = byId(points, id);
+      if (c && isChild(c)) {
+        var parent = byId(points, c.parentId);
+        if (parent) {
+          var d = haversineDistance(parent.lat, parent.lng, c.lat, c.lng);
+          var b = bearingTo(parent.lat, parent.lng, c.lat, c.lng);
+          c.offsetEast = d * Math.sin(toRad(b));
+          c.offsetNorth = d * Math.cos(toRad(b));
+        }
+      }
+    });
   }
 
   // ===================== Tabs =====================
@@ -555,13 +694,44 @@
         info.innerHTML = "<b>" + escapeHtml(p.label) + "</b><br>" +
           "<span class='sampling-badge'>📡 定位中...（完成後會自動儲存）</span>";
       } else {
-        info.innerHTML = "<b>" + escapeHtml(p.label) + "</b><br>" +
+        // 調整4(v2): 主點/子點徽章
+        var badge = "";
+        if (isChild(p)) {
+          var par = byId(points, p.parentId);
+          badge = "<span class='point-badge child'>子點 · 屬於 " + escapeHtml(par ? par.label : "?") + "</span>";
+        } else if (hasChildren(points, p.id)) {
+          badge = "<span class='point-badge parent'>主點 · " + childrenOf(points, p.id).length + " 子點</span>";
+        }
+        info.innerHTML = "<b>" + escapeHtml(p.label) + "</b>" + badge + "<br>" +
           p.lat.toFixed(6) + ", " + p.lng.toFixed(6) +
           " (±" + (p.accuracy != null ? p.accuracy.toFixed(1) : "?") + "m" +
           (p.sampleCount != null ? "，" + p.sampleCount + " 筆取樣" : "") + ")<br>" +
+          (isChild(p) ? "<span class='point-meta'>偏移 東 " + (p.offsetEast || 0).toFixed(1) + "m / 北 " + (p.offsetNorth || 0).toFixed(1) + "m</span><br>" : "") +
           "<span class='point-meta'>" + new Date(p.createdAt).toLocaleString() + "</span>" +
           (p.photo ? "<img class='point-thumb' src='" + p.photo + "' alt='照片'>" : "");
       }
+
+      var actions = document.createElement("div");
+      actions.className = "point-actions";
+
+      if (p.status !== "sampling") {
+        // 調整4(v2): 設為子點 / 還原成獨立點
+        if (isChild(p)) {
+          var freeBtn = document.createElement("button");
+          freeBtn.className = "anchor-btn";
+          freeBtn.textContent = "還原成獨立點";
+          freeBtn.addEventListener("click", function () { detachChild(p.id); });
+          actions.appendChild(freeBtn);
+        } else if (!hasChildren(points, p.id)) {
+          // 獨立點(非子點、且底下沒有子點)才可設為子點(維持扁平兩層)
+          var anchorBtn = document.createElement("button");
+          anchorBtn.className = "anchor-btn";
+          anchorBtn.textContent = "設為子點";
+          anchorBtn.addEventListener("click", function () { openParentPicker(p.id); });
+          actions.appendChild(anchorBtn);
+        }
+      }
+
       var delBtn = document.createElement("button");
       delBtn.className = "delete-btn";
       delBtn.textContent = "刪除";
@@ -569,16 +739,75 @@
         delBtn.disabled = true; // 還沒正式存檔，沒有對應的 localStorage 紀錄可刪
       } else {
         delBtn.addEventListener("click", function () {
-          var all = loadPoints().filter(function (x) { return x.id !== p.id; });
-          savePoints(all);
+          var all = loadPoints().filter(function (x) { return x.id !== p.id && x.parentId !== p.id; });
+          savePoints(all); // 刪主點時一併移除其子點，避免留下孤兒子點
           renderPointList();
         });
       }
+      actions.appendChild(delBtn);
       li.appendChild(info);
-      li.appendChild(delBtn);
+      li.appendChild(actions);
       pointList.appendChild(li);
     });
     updateStorageUsage();
+  }
+
+  // 調整4(v2): 把獨立點設為某父點的子點 —— 用彈窗選父點
+  var parentPickerOverlay = document.getElementById("parentPickerOverlay");
+  var parentPickerList = document.getElementById("parentPickerList");
+  var parentPickerCancel = document.getElementById("parentPickerCancel");
+  var parentPickerChildId = null;
+
+  function openParentPicker(childId) {
+    parentPickerChildId = childId;
+    var points = loadPoints();
+    // 可當父點: 非子點 且 排除自己(可以是已有子點的主點，能再掛更多子點)
+    var candidates = points.filter(function (x) { return !isChild(x) && x.id !== childId; });
+    parentPickerList.innerHTML = "";
+    if (candidates.length === 0) {
+      var empty = document.createElement("div");
+      empty.className = "picker-empty";
+      empty.textContent = "目前沒有可當主點的獨立點。";
+      parentPickerList.appendChild(empty);
+    } else {
+      candidates.forEach(function (par) {
+        var btn = document.createElement("button");
+        btn.textContent = par.label + (hasChildren(points, par.id) ? "（已有 " + childrenOf(points, par.id).length + " 子點）" : "");
+        btn.addEventListener("click", function () { attachChild(childId, par.id); });
+        parentPickerList.appendChild(btn);
+      });
+    }
+    parentPickerOverlay.classList.add("active");
+  }
+  function closeParentPicker() { parentPickerOverlay.classList.remove("active"); parentPickerChildId = null; }
+  parentPickerCancel.addEventListener("click", closeParentPicker);
+  parentPickerOverlay.addEventListener("click", function (e) { if (e.target === parentPickerOverlay) closeParentPicker(); });
+
+  function attachChild(childId, parentId) {
+    var points = loadPoints();
+    var child = byId(points, childId), parent = byId(points, parentId);
+    if (!child || !parent) { closeParentPicker(); return; }
+    // 以目前絕對位置換算成相對父點的 offset(此刻換算的絕對位置 = 目前位置，lat/lng 不變)
+    var d = haversineDistance(parent.lat, parent.lng, child.lat, child.lng);
+    var b = bearingTo(parent.lat, parent.lng, child.lat, child.lng);
+    child.parentId = parentId;
+    child.offsetEast = d * Math.sin(toRad(b));
+    child.offsetNorth = d * Math.cos(toRad(b));
+    savePoints(points);
+    closeParentPicker();
+    renderPointList();
+  }
+
+  function detachChild(childId) {
+    var points = loadPoints();
+    var child = byId(points, childId);
+    if (!child) return;
+    // 目前算出的 lat/lng 直接凍結保留，移除 parentId/offset 欄位
+    delete child.parentId;
+    delete child.offsetEast;
+    delete child.offsetNorth;
+    savePoints(points);
+    renderPointList();
   }
 
   function escapeHtml(s) {
@@ -847,6 +1076,10 @@
     stopSampling();
     abortPendingRegistration("已取消，未儲存。");
   });
+  // 調整1: 點半透明背景 = 取消(不誤存未儲存內容)
+  labelModalOverlay.addEventListener("click", function (e) {
+    if (e.target === labelModalOverlay) { stopSampling(); abortPendingRegistration("已取消，未儲存。"); }
+  });
 
   btnRegister.addEventListener("click", function () {
     if (samplingState.active || pendingRegistration) return; // 需求3: 上一筆還沒結束就整個鎖住
@@ -888,11 +1121,15 @@
   var diagnostics = document.getElementById("diagnostics");
   var orientationWarning = document.getElementById("orientationWarning");
   var fovInput = document.getElementById("fovInput");
+  var maxDistInput = document.getElementById("maxDistInput");
+  maxDistInput.value = MAX_DISPLAY_DISTANCE_M;
+  var arDetailOverlay = document.getElementById("arDetailOverlay");
   var arDetailCard = document.getElementById("arDetailCard");
   var arDetailClose = document.getElementById("arDetailClose");
   var arDetailBody = document.getElementById("arDetailBody");
   var arDetailRename = document.getElementById("arDetailRename");
   var arDetailDelete = document.getElementById("arDetailDelete");
+  var arGroupOverlay = document.getElementById("arGroupOverlay");
   var arGroupList = document.getElementById("arGroupList");
   var arGroupListClose = document.getElementById("arGroupListClose");
   var arGroupListBody = document.getElementById("arGroupListBody");
@@ -943,16 +1180,27 @@
     rows.push("<div class='ar-detail-row'><span>登記時精度</span><b>±" + (p.accuracy != null ? p.accuracy.toFixed(1) : "?") + " m</b></div>");
     rows.push("<div class='ar-detail-row'><span>取樣筆數</span><b>" + (p.sampleCount != null ? p.sampleCount : "?") + "</b></div>");
     rows.push("<div class='ar-detail-row'><span>人工修正</span><b>" + (isPointEdited(p) ? escapeHtml(editedFlagText(p)) : "未修正") + "</b></div>");
+    // 調整4(v2): 父子關係
+    var allPts = loadPoints();
+    if (isChild(p)) {
+      var parent = byId(allPts, p.parentId);
+      rows.push("<div class='ar-detail-row'><span>屬於主點</span><b>" + escapeHtml(parent ? parent.label : "(已不存在)") + "</b></div>");
+    } else {
+      var kids = childrenOf(allPts, p.id);
+      if (kids.length > 0) rows.push("<div class='ar-detail-row'><span>主點</span><b>底下有 " + kids.length + " 個子點</b></div>");
+    }
     if (p.photo) rows.push("<img class='ar-detail-photo' src='" + p.photo + "' alt='現場照片'>");
     arDetailBody.innerHTML = rows.join("");
-    arDetailCard.classList.add("active");
+    arDetailOverlay.classList.add("active");
   }
 
   function closeArDetail() {
-    arDetailCard.classList.remove("active");
+    arDetailOverlay.classList.remove("active");
     viewState.openDetailPointId = null;
   }
   arDetailClose.addEventListener("click", closeArDetail);
+  // 調整1: 點半透明背景關閉(等同按關閉)
+  arDetailOverlay.addEventListener("click", function (e) { if (e.target === arDetailOverlay) closeArDetail(); });
 
   // ---------- 調整2: 群組清單彈窗 ----------
   function ensureGroupEl(index) {
@@ -988,11 +1236,11 @@
       item.addEventListener("click", function () { openGroupItem(id); });
       arGroupListBody.appendChild(item);
     });
-    arGroupList.classList.add("active");
+    arGroupOverlay.classList.add("active");
   }
 
   function closeGroupList() {
-    arGroupList.classList.remove("active");
+    arGroupOverlay.classList.remove("active");
     viewState.openGroupMemberIds = null;
   }
 
@@ -1002,6 +1250,8 @@
     openArDetail(id);
   }
   arGroupListClose.addEventListener("click", closeGroupList);
+  // 調整1: 點半透明背景關閉
+  arGroupOverlay.addEventListener("click", function (e) { if (e.target === arGroupOverlay) closeGroupList(); });
 
   // ---------- 調整4: 改名稱 / 刪除 ----------
   function updateRenameButtons() {
@@ -1038,6 +1288,8 @@
     if (h3) h3.textContent = newLabel;
   });
   renameModalCancel.addEventListener("click", closeRenameModal);
+  // 調整1: 點半透明背景 = 取消改名
+  renameModalOverlay.addEventListener("click", function (e) { if (e.target === renameModalOverlay) closeRenameModal(); });
   arDetailRename.addEventListener("click", openRenameModal);
 
   arDetailDelete.addEventListener("click", function () {
@@ -1210,6 +1462,9 @@
     if (!fov || isNaN(fov)) fov = 65;
     fov = Math.max(20, Math.min(120, fov));
     var halfFov = fov / 2;
+    // 調整2(v2): 最大顯示距離門檻(可調，即時生效)
+    var maxDist = parseFloat(maxDistInput.value);
+    if (!maxDist || isNaN(maxDist) || maxDist <= 0) maxDist = MAX_DISPLAY_DISTANCE_M;
 
     orientationWarning.style.display = viewState.headingIsFallback ? "block" : "none";
 
@@ -1248,13 +1503,16 @@
         viewState.currentPosition.lat, viewState.currentPosition.lng, p.lat, p.lng
       );
       var rel = normalizeRelative(brg, viewState.currentHeading);
-      var inView = Math.abs(rel) <= halfFov;
+      var inFov = Math.abs(rel) <= halfFov;
+      var withinMax = dist <= maxDist;
+      var inView = inFov && withinMax; // 調整2(v2): 超過顯示距離的點不當作可顯示
       var xPercent = 50 + (rel / halfFov) * 50;
 
       entries.push({ p: p, dist: dist, brg: brg, rel: rel, inView: inView, xPercent: xPercent });
+      // 診斷仍列出所有點(含超過顯示距離的)，方便使用者知道它存在
       diagLines.push(
         p.label + ": bearing=" + brg.toFixed(1) + "° dist=" + dist.toFixed(1) + "m rel=" + rel.toFixed(1) +
-        "° inView=" + (inView ? "YES" : "no") + " (" + regAccuracyText + ")"
+        "° inFOV=" + (inFov ? "YES" : "no") + (withinMax ? "" : " (超過顯示距離)") + " (" + regAccuracyText + ")"
       );
     });
 
@@ -1419,13 +1677,32 @@
   var btnClearMeasure = document.getElementById("btnClearMeasure");
   var btnToggleEditMode = document.getElementById("btnToggleEditMode");
   var btnSelectRecent = document.getElementById("btnSelectRecent");
+  var btnToggleCluster = document.getElementById("btnToggleCluster");
   var mapStatus = document.getElementById("mapStatus");
   var measureResultBar = document.getElementById("measureResultBar");
 
   var leafletMap = null;
   var mapMarkersLayer = null;
+  var mapLinesLayer = null;   // 調整4(v2): 父子虛線連線(不聚合)
   var mapCurrentLocationMarker = null;
   var mapAutoFetchedLocationOnce = false;
+  var clusterModeActive = false; // 調整3(v2): 聚合顯示開關(僅當次瀏覽有效，不存 localStorage)
+
+  // 調整4(v2): 子點(橘)/父點(金星框)marker 樣式
+  var childMarkerIcon = L.divIcon({
+    className: "child-marker", html: "<div class='child-marker-inner'></div>",
+    iconSize: [20, 20], iconAnchor: [10, 10]
+  });
+  var parentMarkerIcon = L.divIcon({
+    className: "parent-marker", html: "<div class='parent-marker-inner'></div>",
+    iconSize: [22, 22], iconAnchor: [11, 11]
+  });
+  // 依點的角色回傳預設(未選取)圖示
+  function defaultIconFor(points, p) {
+    if (isChild(p)) return childMarkerIcon;
+    if (hasChildren(points, p.id)) return parentMarkerIcon;
+    return new L.Icon.Default();
+  }
 
   // 調整2: 量測模式狀態
   var measureModeActive = false;
@@ -1450,6 +1727,11 @@
     iconAnchor: [11, 11]
   });
 
+  // 調整3(v2): 依聚合開關建立 markers 圖層(cluster group 或一般 layer group)
+  function buildMarkersLayer() {
+    return clusterModeActive ? L.markerClusterGroup() : L.layerGroup();
+  }
+
   function initMapIfNeeded() {
     if (leafletMap) return;
     leafletMap = L.map("leafletMap", { attributionControl: true }).setView(DEFAULT_MAP_CENTER, 15);
@@ -1457,7 +1739,8 @@
       maxZoom: MAP_MAX_ZOOM,
       attribution: "&copy; OpenStreetMap contributors"
     }).addTo(leafletMap);
-    mapMarkersLayer = L.layerGroup().addTo(leafletMap);
+    mapLinesLayer = L.layerGroup().addTo(leafletMap); // 父子虛線(永遠不聚合)
+    mapMarkersLayer = buildMarkersLayer().addTo(leafletMap);
 
     // 調整1: 偏僻地點常常在高 zoom 等級沒有圖磚資料(伺服器回404觸發 tileerror)，
     // 累積同一 zoom 等級的失敗次數，超過門檻就自動退回上一級，不讓畫面卡在空白/模糊狀態。
@@ -1547,6 +1830,7 @@
     if (active && measureModeActive) setMeasureMode(false);
     editModeActive = active;
     editSelectedIds = [];
+    if (!editModeActive) closeOffsetPanel(); // 調整4(v2): 關掉編輯模式時收起偏移面板
     renderMapMarkers();
     btnToggleEditMode.textContent = editModeActive ? "✏️ 編輯模式：開啟" : "✏️ 編輯模式：關閉";
     btnSelectRecent.style.display = editModeActive ? "inline-block" : "none";
@@ -1561,9 +1845,11 @@
 
   // 依 editSelectedIds 套用選取樣式與可拖曳狀態(只有已選取的 marker 可拖曳)
   function applySelectionVisuals() {
+    var points = loadPoints();
     mapMarkerRefs.forEach(function (ref) {
       var selected = editSelectedIds.indexOf(ref.point.id) !== -1;
-      ref.marker.setIcon(selected ? editSelectedIcon : new L.Icon.Default());
+      // 未選取時還原成該點角色對應的圖示(子點橘/父點金星/獨立藍)，而非一律預設藍
+      ref.marker.setIcon(selected ? editSelectedIcon : defaultIconFor(points, ref.point));
       if (ref.marker.dragging) {
         if (selected && editModeActive) ref.marker.dragging.enable();
         else ref.marker.dragging.disable();
@@ -1585,6 +1871,9 @@
     else editSelectedIds.splice(idx, 1);
     applySelectionVisuals();
     updateEditStatusBar();
+    // 調整4(v2): 點子點時顯示 8 方向偏移調整面板；點非子點則收起面板
+    if (isChild(point)) openOffsetPanel(point.id);
+    else closeOffsetPanel();
   }
 
   function selectRecentPoints() {
@@ -1613,8 +1902,10 @@
       return;
     }
     var now = new Date().toISOString();
+    var movedIds = [];
     points.forEach(function (p) {
       if (editSelectedIds.indexOf(p.id) === -1) return;
+      movedIds.push(p.id);
       // 舊資料第一次被編輯時，先把當時的 lat/lng 複製進 original 欄位再修改
       if (p.originalLat == null || p.originalLng == null) {
         p.originalLat = p.lat;
@@ -1625,6 +1916,7 @@
       p.lat = target.lat;
       p.lng = target.lng;
     });
+    reconcileAfterMove(points, movedIds); // 調整4(v2): 父點移動→子點跟著平移；子點移動→回推 offset
     savePoints(points);
     editSelectedIds = [];
     renderMapMarkers();
@@ -1660,6 +1952,7 @@
           x.lat = h.fromLat;
           x.lng = h.fromLng;
         });
+        recomputeChildrenLatLng(points, p.id); // 調整4(v2): 父點座標變→子點跟著平移
         savePoints(points);
         leafletMap.closePopup();
         renderMapMarkers();
@@ -1678,6 +1971,7 @@
             x.lng = x.originalLng;
             x.editHistory = [];
           });
+          recomputeChildrenLatLng(points, p.id); // 調整4(v2): 父點座標變→子點跟著平移
           savePoints(points);
           leafletMap.closePopup();
           renderMapMarkers();
@@ -1700,9 +1994,14 @@
 
   function renderMapMarkers() {
     mapMarkersLayer.clearLayers();
+    mapLinesLayer.clearLayers();
     mapMarkerRefs = [];
-    loadPoints().forEach(function (p) {
-      var marker = L.marker([p.lat, p.lng]).addTo(mapMarkersLayer);
+    var points = loadPoints();
+    points.forEach(function (p) {
+      // 調整4(v2): 依角色套用圖示(量測模式維持預設藍以免與選取樣式混淆)
+      var icon = measureModeActive ? new L.Icon.Default() : defaultIconFor(points, p);
+      var marker = L.marker([p.lat, p.lng], { icon: icon });
+      mapMarkersLayer.addLayer(marker); // 支援 cluster group 與 layer group
       if (editModeActive) {
         marker.bindPopup(buildEditPopupContent(p));
       } else if (!measureModeActive) {
@@ -1715,6 +2014,19 @@
       marker.on("dragend", function () { onEditMarkerDragEnd(p, marker); });
       mapMarkerRefs.push({ point: p, marker: marker });
     });
+
+    // 調整4(v2): 子點↔父點虛線(聚合開啟時不畫，避免干擾 cluster 圖示)
+    if (!clusterModeActive) {
+      points.forEach(function (c) {
+        if (!isChild(c)) return;
+        var parent = byId(points, c.parentId);
+        if (!parent) return;
+        L.polyline([[parent.lat, parent.lng], [c.lat, c.lng]], {
+          color: "#ff8c1a", weight: 1.5, dashArray: "4,6", opacity: 0.9
+        }).addTo(mapLinesLayer);
+      });
+    }
+
     if (editModeActive) applySelectionVisuals();
   }
 
@@ -1763,11 +2075,116 @@
     );
   }
 
+  // ---------- 調整4(v2): 8 方向偏移調整面板 ----------
+  var offsetPanel = document.getElementById("offsetPanel");
+  var offsetPanelInfo = document.getElementById("offsetPanelInfo");
+  var offsetStepRow = document.getElementById("offsetStepRow");
+  var offsetPad = document.getElementById("offsetPad");
+  var offsetPanelClose = document.getElementById("offsetPanelClose");
+  var offsetPanelChildId = null;
+  var offsetStepM = OFFSET_STEP_DEFAULT_M;
+
+  // 8 方向 → (東偏移量, 北偏移量) 的單位向量(對角線在兩軸各動一步)
+  var OFFSET_DIRECTIONS = {
+    "NW": [-1, 1], "N": [0, 1], "NE": [1, 1],
+    "W":  [-1, 0], "E": [1, 0],
+    "SW": [-1, -1], "S": [0, -1], "SE": [1, -1]
+  };
+  var PAD_LAYOUT = ["NW", "N", "NE", "W", "center", "E", "SW", "S", "SE"];
+  var PAD_ARROWS = { NW: "↖", N: "↑", NE: "↗", W: "←", E: "→", SW: "↙", S: "↓", SE: "↘" };
+
+  function buildOffsetStepRow() {
+    offsetStepRow.innerHTML = "";
+    OFFSET_STEP_OPTIONS_M.forEach(function (step) {
+      var b = document.createElement("button");
+      b.textContent = step + "m";
+      if (step === offsetStepM) b.className = "active";
+      b.addEventListener("click", function () {
+        offsetStepM = step;
+        buildOffsetStepRow();
+      });
+      offsetStepRow.appendChild(b);
+    });
+  }
+
+  function buildOffsetPad() {
+    offsetPad.innerHTML = "";
+    PAD_LAYOUT.forEach(function (dir) {
+      var cell = document.createElement("button");
+      if (dir === "center") {
+        cell.className = "pad-center";
+        cell.textContent = "◎";
+        cell.disabled = true;
+      } else {
+        cell.textContent = PAD_ARROWS[dir];
+        cell.addEventListener("click", function () {
+          var v = OFFSET_DIRECTIONS[dir];
+          nudgeChildOffset(offsetPanelChildId, v[0] * offsetStepM, v[1] * offsetStepM);
+        });
+      }
+      offsetPad.appendChild(cell);
+    });
+  }
+
+  function updateOffsetPanelInfo() {
+    var points = loadPoints();
+    var c = byId(points, offsetPanelChildId);
+    if (!c) { closeOffsetPanel(); return; }
+    var parent = byId(points, c.parentId);
+    offsetPanelInfo.innerHTML = "調整子點「" + escapeHtml(c.label) + "」<br>" +
+      "主點：" + escapeHtml(parent ? parent.label : "(已不存在)") + "<br>" +
+      "目前偏移：東 " + (c.offsetEast || 0).toFixed(1) + "m / 北 " + (c.offsetNorth || 0).toFixed(1) + "m";
+  }
+
+  function openOffsetPanel(childId) {
+    offsetPanelChildId = childId;
+    buildOffsetStepRow();
+    buildOffsetPad();
+    updateOffsetPanelInfo();
+    offsetPanel.classList.add("active");
+  }
+  function closeOffsetPanel() {
+    offsetPanel.classList.remove("active");
+    offsetPanelChildId = null;
+  }
+  offsetPanelClose.addEventListener("click", closeOffsetPanel);
+
+  // 按方向鍵 → 調整該子點 offset、即時重算 lat/lng、存檔、地圖同步移動
+  function nudgeChildOffset(childId, dEast, dNorth) {
+    if (childId == null) return;
+    var points = loadPoints();
+    var c = byId(points, childId);
+    if (!c || !isChild(c)) return;
+    c.offsetEast = (c.offsetEast || 0) + dEast;
+    c.offsetNorth = (c.offsetNorth || 0) + dNorth;
+    var parent = byId(points, c.parentId);
+    if (parent) {
+      var ll = computeChildLatLng(parent.lat, parent.lng, c.offsetEast, c.offsetNorth);
+      c.lat = ll.lat;
+      c.lng = ll.lng;
+    }
+    savePoints(points);
+    renderMapMarkers();   // marker 移到新位置 + 虛線更新
+    updateOffsetPanelInfo();
+  }
+
+  // ---------- 調整3(v2): 聚合顯示開關 ----------
+  function setClusterMode(active) {
+    clusterModeActive = active;
+    if (leafletMap && mapMarkersLayer) {
+      leafletMap.removeLayer(mapMarkersLayer);
+      mapMarkersLayer = buildMarkersLayer().addTo(leafletMap);
+      renderMapMarkers();
+    }
+    btnToggleCluster.textContent = clusterModeActive ? "🔗 聚合顯示：開啟" : "🔗 聚合顯示：關閉";
+  }
+
   function enterMapTab() {
     initMapIfNeeded();
 
     // 每次重新進入頁籤都還原成未量測/未編輯狀態：markers 即將被 renderMapMarkers() 整組換新，
     // 舊的量測連線/選取樣式參照的是即將銷毀的 marker 物件，直接重置狀態避免殘留。
+    closeOffsetPanel(); // 調整4(v2): 關閉偏移面板
     measureModeActive = false;
     measureFirstPoint = null;
     measureActiveMarkers = [];
@@ -1809,6 +2226,7 @@
   btnToggleEditMode.addEventListener("click", function () { setEditMode(!editModeActive); });
   btnSelectRecent.addEventListener("click", selectRecentPoints);
   btnSelectRecent.textContent = "🕐 選取最近 " + RECENT_SELECT_COUNT + " 筆";
+  btnToggleCluster.addEventListener("click", function () { setClusterMode(!clusterModeActive); });
 
 })();
 </script>
