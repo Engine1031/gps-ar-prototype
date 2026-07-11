@@ -232,6 +232,8 @@
     padding: 10px 14px; font-size: 14px; font-weight: bold;
     background: #222; color: #fff; border: 1px solid #666; border-radius: 8px; cursor: pointer;
   }
+  /* 調整1(v2.7): 鎖定定位時「編輯模式」鈕灰掉不可點 */
+  .ctrl-panel button:disabled { background: #1a1a1a; color: #666; border-color: #444; cursor: not-allowed; }
   #fovWrap { display: flex; align-items: center; gap: 6px; background: #222; border: 1px solid #666; border-radius: 8px; padding: 6px 10px; }
   #fovWrap label { font-size: 13px; }
   #fovInput { width: 50px; font-size: 15px; background: #111; color: #fff; border: 1px solid #666; border-radius: 4px; text-align: center; }
@@ -350,6 +352,19 @@
   }
   .pin-cargo-badge::after { content: "📦"; }
   .pin-cargo-badge .cargo-count {
+    position: absolute; top: -8px; right: -8px; min-width: 15px; height: 15px; line-height: 15px;
+    background: #d33; color: #fff; font-size: 9px; font-weight: bold; text-align: center;
+    border: 1px solid #fff; border-radius: 8px; padding: 0 3px;
+  }
+  /* 調整1(v2.7): 隱藏定位點大頭針模式 —— 有貨物的點只顯示徽章本體(無藍針)，置中對齊座標點 */
+  .cargo-badge-standalone-pin { background: transparent; border: none; }
+  .cargo-badge-standalone {
+    position: relative; width: 24px; height: 24px; border-radius: 50%;
+    background: #1a73e8; border: 2px solid #fff; box-shadow: 0 0 4px rgba(26,115,232,0.9);
+    display: flex; align-items: center; justify-content: center; font-size: 13px; line-height: 1;
+  }
+  .cargo-badge-standalone::after { content: "📦"; }
+  .cargo-badge-standalone .cargo-count {
     position: absolute; top: -8px; right: -8px; min-width: 15px; height: 15px; line-height: 15px;
     background: #d33; color: #fff; font-size: 9px; font-weight: bold; text-align: center;
     border: 1px solid #fff; border-radius: 8px; padding: 0 3px;
@@ -599,6 +614,9 @@
     <button id="mapCtrlToggle" class="ctrl-toggle">☰</button>
     <div id="mapTopBar" class="ctrl-panel">
       <button id="btnRefreshMapLocation">📍 重新整理目前位置</button>
+      <button id="btnToggleBaseLayer">🗺️ 底圖：街道圖</button>
+      <button id="btnToggleMapLock">🔒 鎖定定位：關閉</button>
+      <button id="btnToggleHidePins">🙈 隱藏大頭針：關閉</button>
       <button id="btnToggleMeasureMode">📏 量測模式：關閉</button>
       <button id="btnClearMeasure">🧹 清除量測</button>
       <button id="btnToggleEditMode">✏️ 編輯模式：關閉</button>
@@ -723,7 +741,7 @@
   "use strict";
 
   var STORAGE_KEY = "gpsArPoints_v1";
-  var APP_VERSION = "2.6.0"; // 每次改版記得同步更新
+  var APP_VERSION = "2.7.0"; // 每次改版記得同步更新
   var RECENT_COLORS_KEY = "gpsArRecentColors_v1"; // 調整4: 最近使用顏色清單
   var RECENT_COLORS_MAX = 10;
   var DEFAULT_CARGO_COLOR = "#ff3b30";
@@ -737,6 +755,7 @@
   var LIVE_POSITION_JUMP_THRESHOLD_M = 30;     // 檢視模式: 新讀數與目前平滑值超過此距離視為真實移動，重置緩衝區
   var DEFAULT_MAP_CENTER = [25.0330, 121.5654]; // 地圖預覽: 完全沒有登記點也沒有目前位置時的預設中心(台北市)
   var MAP_MAX_ZOOM = 19;              // 調整1: OpenStreetMap 標準圖磚可用的最大 zoom
+  var MAP_SATELLITE_MAX_ZOOM = 20;    // 調整3(v2.7): Esri World Imagery 衛星圖磚可用上限(多數地區可達，實際仍靠 tileerror 自動退階保護)
   var MAP_TILE_ERROR_THRESHOLD = 3;   // 調整1: 同一 zoom 等級累積這麼多次圖磚載入失敗，就自動退回上一級
   var RECENT_SELECT_COUNT = 5;        // 編輯模式: 「選取最近 N 筆」一鍵選取的數量
   var PHOTO_MAX_EDGE = 800;           // 調整2: 拍照壓縮 —— 長邊縮到此像素
@@ -2107,6 +2126,9 @@
   // lat/lng 為「目前生效座標」(AR 檢視/量測都讀它)，originalLat/originalLng 保留 GPS 原始值，
   // editHistory 記錄每次人工修正供回溯。
   var btnRefreshMapLocation = document.getElementById("btnRefreshMapLocation");
+  var btnToggleBaseLayer = document.getElementById("btnToggleBaseLayer"); // 調整3(v2.7): 底圖切換
+  var btnToggleMapLock = document.getElementById("btnToggleMapLock");     // 調整1(v2.7): 鎖定定位
+  var btnToggleHidePins = document.getElementById("btnToggleHidePins");   // 調整1(v2.7): 隱藏大頭針
   var btnToggleMeasureMode = document.getElementById("btnToggleMeasureMode");
   var btnClearMeasure = document.getElementById("btnClearMeasure");
   var btnToggleEditMode = document.getElementById("btnToggleEditMode");
@@ -2121,6 +2143,11 @@
   var mapCurrentLocationMarker = null;
   var mapAutoFetchedLocationOnce = false;
   var clusterModeActive = false; // 調整3(v2): 聚合顯示開關(僅當次瀏覽有效，不存 localStorage)
+  var mapLockActive = false;     // 調整1(v2.7): 鎖定定位開關(當次瀏覽有效，不存 localStorage)
+  var mapHidePins = false;       // 調整1(v2.7): 隱藏定位點大頭針子選項(當次瀏覽有效，不存 localStorage)
+  var currentTileLayer = null;         // 調整3(v2.7): 目前使用中的底圖圖層
+  var currentBaseLayerKey = "street";  // 調整3(v2.7): 目前底圖 key(street/satellite)，當次瀏覽有效
+  var tileErrorCounts = {};            // 調整1: 同一 zoom 等級的圖磚載入失敗次數(切換底圖/zoom 時重置)
 
   // 調整1(v2.6): 定位點藍針身分「固定」，有在場貨物時在藍針右上角「疊加」貨物徽章(📦 + 筆數)，
   // 不再整個換成貨物箱，避免切換不同點時誤以為圖示互相調換。針尖(iconAnchor 底部中心)準確指向座標。
@@ -2141,6 +2168,14 @@
     var n = visibleCargoCount(p);
     if (n > 0) return cargoBadgePinIcon(n);
     return new L.Icon.Default();
+  }
+  // 調整1(v2.7): 隱藏大頭針模式下，有貨物的點只顯示「徽章本體」(無藍針)，置中對齊座標點(無貨物的點在呼叫端直接跳過不畫)
+  function cargoBadgeStandaloneIcon(n) {
+    return L.divIcon({
+      className: "cargo-badge-standalone-pin",
+      html: "<div class='cargo-badge-standalone'><span class='cargo-count'>" + n + "</span></div>",
+      iconSize: [24, 24], iconAnchor: [12, 12]
+    });
   }
 
   // 調整2: 量測模式狀態
@@ -2193,26 +2228,54 @@
     return cg;
   }
 
+  // 調整3(v2.7): 免費、不需 API 金鑰的底圖來源 —— 街道圖(OSM，原有不變) + 衛星圖(Esri World Imagery)
+  var TILE_SOURCES = {
+    street: {
+      label: "🗺️ 底圖：街道圖",
+      url: "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
+      maxZoom: MAP_MAX_ZOOM,
+      attribution: "&copy; OpenStreetMap contributors"
+    },
+    satellite: {
+      label: "🛰️ 底圖：衛星圖",
+      url: "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+      maxZoom: MAP_SATELLITE_MAX_ZOOM,
+      attribution: "Tiles &copy; Esri &mdash; Source: Esri, Maxar, Earthstar Geographics, and the GIS User Community"
+    }
+  };
+  var BASE_LAYER_KEYS = ["street", "satellite"]; // 切換按鈕循環順序
+
+  // 調整1(原有)+調整3(v2.7): 累積同一 zoom 等級的圖磚載入失敗次數，超過門檻自動退回上一級，
+  // 不管目前是哪個底圖都適用，不讓畫面卡在空白/模糊狀態。
+  function handleTileError() {
+    var z = leafletMap.getZoom();
+    tileErrorCounts[z] = (tileErrorCounts[z] || 0) + 1;
+    if (tileErrorCounts[z] >= MAP_TILE_ERROR_THRESHOLD && z > leafletMap.getMinZoom()) {
+      leafletMap.setZoom(z - 1);
+    }
+  }
+
+  // 調整3(v2.7): 切換底圖 —— 移除舊圖層、加入新圖層，marker/聚合/篩選等疊加圖層完全不受影響(不同 layer)。
+  function setBaseLayer(key) {
+    if (!TILE_SOURCES[key] || !leafletMap) return;
+    var src = TILE_SOURCES[key];
+    if (currentTileLayer) leafletMap.removeLayer(currentTileLayer);
+    currentBaseLayerKey = key;
+    tileErrorCounts = {}; // 換了一套圖磚可用範圍，錯誤計數重新累積
+    currentTileLayer = L.tileLayer(src.url, { maxZoom: src.maxZoom, attribution: src.attribution }).addTo(leafletMap);
+    currentTileLayer.on("tileerror", handleTileError);
+    if (btnToggleBaseLayer) btnToggleBaseLayer.textContent = src.label;
+  }
+
   function initMapIfNeeded() {
     if (leafletMap) return;
     leafletMap = L.map("leafletMap", { attributionControl: true }).setView(DEFAULT_MAP_CENTER, 15);
-    var tileLayer = L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-      maxZoom: MAP_MAX_ZOOM,
-      attribution: "&copy; OpenStreetMap contributors"
-    }).addTo(leafletMap);
+    setBaseLayer(currentBaseLayerKey); // 調整3(v2.7): 預設街道圖(延續使用者本次瀏覽已選擇的底圖)
     mapLinesLayer = L.layerGroup().addTo(leafletMap); // 父子虛線(永遠不聚合)
     mapMarkersLayer = buildMarkersLayer().addTo(leafletMap);
 
     // 調整1: 偏僻地點常常在高 zoom 等級沒有圖磚資料(伺服器回404觸發 tileerror)，
     // 累積同一 zoom 等級的失敗次數，超過門檻就自動退回上一級，不讓畫面卡在空白/模糊狀態。
-    var tileErrorCounts = {};
-    tileLayer.on("tileerror", function () {
-      var z = leafletMap.getZoom();
-      tileErrorCounts[z] = (tileErrorCounts[z] || 0) + 1;
-      if (tileErrorCounts[z] >= MAP_TILE_ERROR_THRESHOLD && z > leafletMap.getMinZoom()) {
-        leafletMap.setZoom(z - 1);
-      }
-    });
     leafletMap.on("zoomstart", function () {
       tileErrorCounts = {};
     });
@@ -2288,6 +2351,7 @@
   }
 
   function setEditMode(active) {
+    if (active && mapLockActive) return; // 調整1(v2.7): 鎖定定位時禁止進入編輯模式(按鈕本身已 disabled，此為防禦性保護)
     if (active && measureModeActive) setMeasureMode(false);
     editModeActive = active;
     editSelectedIds = [];
@@ -2302,6 +2366,22 @@
       measureResultBar.textContent = "";
       measureResultBar.style.display = "none";
     }
+  }
+
+  // ---------- 調整1(v2.7): 鎖定定位 + 隱藏大頭針(當次瀏覽有效，不存 localStorage) ----------
+  // 鎖定只鎖「定位點位置」：停用編輯模式(連帶停用拖曳與 8 方向微調，兩者皆只存在於編輯模式內)，
+  // 貨物相關操作(popup/新增/編輯/移動/出貨)完全不受影響，仍可正常點 marker 開 popup 操作。
+  function setMapLock(active) {
+    mapLockActive = active;
+    if (mapLockActive && editModeActive) setEditMode(false); // 強制退出編輯模式，順帶清空選取(setEditMode 內已處理)
+    btnToggleEditMode.disabled = mapLockActive;
+    btnToggleMapLock.textContent = mapLockActive ? "🔒 鎖定定位：開啟" : "🔒 鎖定定位：關閉";
+  }
+  // 隱藏大頭針只影響一般瀏覽的顯示樣式，不影響資料，也不影響編輯/量測模式(那兩個模式需要看到所有點才能操作)
+  function setHidePins(active) {
+    mapHidePins = active;
+    btnToggleHidePins.textContent = mapHidePins ? "🙈 隱藏大頭針：開啟" : "🙈 隱藏大頭針：關閉";
+    if (leafletMap && mapMarkersLayer) renderMapMarkers();
   }
 
   // 依 editSelectedIds 套用選取樣式與可拖曳狀態(只有已選取的 marker 可拖曳)
@@ -2894,11 +2974,18 @@
     mapLinesLayer.clearLayers();
     mapMarkerRefs = [];
     var points = loadPoints();
+    // 調整1(v2.7): 隱藏大頭針只在一般瀏覽套用，編輯/量測模式仍需看到所有點才能操作(比照篩選的既有邏輯)
+    var hidePinsNow = mapHidePins && !editModeActive && !measureModeActive;
     points.forEach(function (p) {
       // 調整8/修正3: 全域篩選 —— 只顯示通過篩選的地標(僅影響顯示，不動資料)。編輯/量測模式不套用篩選以免誤藏。
       if (!editModeActive && !measureModeActive && filterIsActive() && !pointPassesFilter(p)) return;
+      var n = visibleCargoCount(p);
+      // 調整1(v2.7): 隱藏大頭針模式下，沒有貨物的點完全不顯示；有貨物的點下方分支只給徽章圖示(無藍針)
+      if (hidePinsNow && n === 0) return;
       // v3: 有在場貨物→貨物徽章圖示，否則一般藍色(量測模式維持預設藍以免與選取樣式混淆)
-      var icon = measureModeActive ? new L.Icon.Default() : defaultIconFor(points, p);
+      var icon = measureModeActive ? new L.Icon.Default()
+        : hidePinsNow ? cargoBadgeStandaloneIcon(n)
+        : defaultIconFor(points, p);
       var marker = L.marker([p.lat, p.lng], { icon: icon });
       marker._pointId = p.id; // 供聚合清單對照
       mapMarkersLayer.addLayer(marker); // 支援 cluster group 與 layer group
@@ -3145,12 +3232,16 @@
     mapMoveState = { active: false, fromPointId: null, rec: null };
 
     renderMapMarkers();
-    syncFilterUI(); // 調整8: 進地圖時套用目前 filterState(含商品頁籤設定的篩選)並更新提示條
-    fitMapView();
+    // 調整8: 進地圖時套用目前 filterState(含商品頁籤設定的篩選)並更新提示條
+    // 調整2(v2.7): syncFilterUI() 若偵測到篩選訊號剛改變，內部已自動飛到篩選範圍(回傳 true)，
+    // 這時下面就不要再用 fitMapView()(fit 全部點)蓋掉剛才飛過去的畫面。
+    var didAutoFly = syncFilterUI();
+    if (!didAutoFly) fitMapView();
     // 剛從 display:none 切成可見時容器尺寸才會確定，下一輪畫面更新後要通知 Leaflet 重新量測。
     requestAnimationFrame(function () {
       leafletMap.invalidateSize();
-      fitMapView();
+      // 用正確容器尺寸重新定位一次：篩選中則校正到篩選範圍(即時、不再飛一次動畫)，否則校正到全部點視野。
+      if (didAutoFly) focusOnFilteredPoints(false); else fitMapView();
     });
     if (!mapAutoFetchedLocationOnce) {
       mapAutoFetchedLocationOnce = true;
@@ -3159,6 +3250,14 @@
   }
 
   btnRefreshMapLocation.addEventListener("click", refreshMapCurrentLocation);
+  // 調整3(v2.7): 底圖切換(街道圖⇄衛星圖)
+  btnToggleBaseLayer.addEventListener("click", function () {
+    var idx = BASE_LAYER_KEYS.indexOf(currentBaseLayerKey);
+    setBaseLayer(BASE_LAYER_KEYS[(idx + 1) % BASE_LAYER_KEYS.length]);
+  });
+  // 調整1(v2.7): 鎖定定位 / 隱藏大頭針
+  btnToggleMapLock.addEventListener("click", function () { setMapLock(!mapLockActive); });
+  btnToggleHidePins.addEventListener("click", function () { setHidePins(!mapHidePins); });
   btnToggleMeasureMode.addEventListener("click", function () { setMeasureMode(!measureModeActive); });
   btnClearMeasure.addEventListener("click", function () {
     clearMeasurementVisuals();
@@ -3179,7 +3278,32 @@
   var mapFilterText = document.getElementById("mapFilterText");
   var btnClearMapFilter = document.getElementById("btnClearMapFilter");
 
-  // 篩選變更後刷新所有相關 UI(出貨鈕/地圖markers+提示條/商品清單/商品下拉)
+  // ---------- 調整2(v2.7): 篩選啟用/改變時，若地圖可見，自動 flyTo/fitBounds 到符合篩選的點 ----------
+  // 只在「篩選訊號實際改變」的當下觸發一次(lastFlySignature 記錄上次已飛過的訊號)，
+  // 避免同一篩選在重繪/切頁籤來回時被重複觸發，干擾使用者手動平移/縮放。清除篩選只重置訊號、不移動視野。
+  var lastFlySignature = null;
+  function currentFilterSignature() {
+    if (!filterIsActive()) return null;
+    return (filterState.landmarkId || "") + "|" + (filterState.colorHex || "");
+  }
+  // animate=true 用平滑 flyTo/flyToBounds(即時反應)；animate=false 用即時 fitBounds/setView(供 rAF 容器尺寸校正用，不要疊加二次動畫)
+  function focusOnFilteredPoints(animate) {
+    var points = loadPoints().filter(pointPassesFilter);
+    if (points.length === 0) { fitMapView(); return; } // 沒有符合的點，退回預設視野(全部點)
+    var latlngs = points.map(function (p) { return [p.lat, p.lng]; });
+    var maxZ = leafletMap.getMaxZoom(); // 不超過目前底圖的圖磚可用範圍(街道圖/衛星圖各自不同，見調整3)
+    if (latlngs.length === 1) {
+      if (animate) leafletMap.flyTo(latlngs[0], maxZ, { duration: 0.8 });
+      else leafletMap.setView(latlngs[0], maxZ);
+    } else {
+      var bounds = L.latLngBounds(latlngs);
+      if (animate) leafletMap.flyToBounds(bounds, { padding: [50, 50], maxZoom: maxZ, duration: 0.8 });
+      else leafletMap.fitBounds(bounds, { padding: [50, 50], maxZoom: maxZ });
+    }
+  }
+
+  // 篩選變更後刷新所有相關 UI(出貨鈕/地圖markers+提示條/商品清單/商品下拉)。
+  // 回傳值(調整2 v2.7): 這次呼叫是否觸發了自動定位到篩選範圍 —— enterMapTab() 靠這個判斷要不要再用 fitMapView() 蓋掉。
   function syncFilterUI() {
     var on = filterState.colorHex != null;
     var stxt = on ? "🚚 出貨模式：" + (function () { var l = ""; distinctActiveColors(loadPoints()).forEach(function (c) { if (c.colorHex === filterState.colorHex) l = c.colorLabel; }); return l || filterState.colorHex; })() : "🚚 出貨模式：關閉";
@@ -3197,6 +3321,20 @@
       filterColor.value = filterState.colorHex || "";
     }
     if (screens.products.classList.contains("active")) renderProducts();
+
+    // 調整2(v2.7): 地圖頁籤可見時，篩選訊號若剛改變就自動飛過去；篩選清除只重置訊號、不移動視野
+    var didAutoFly = false;
+    if (leafletMap && screens.map.classList.contains("active")) {
+      var sig = currentFilterSignature();
+      if (sig == null) {
+        lastFlySignature = null;
+      } else if (sig !== lastFlySignature) {
+        lastFlySignature = sig;
+        focusOnFilteredPoints(true);
+        didAutoFly = true;
+      }
+    }
+    return didAutoFly;
   }
   function clearAllFilters() { filterState.landmarkId = null; filterState.colorHex = null; syncFilterUI(); }
   btnClearMapFilter.addEventListener("click", clearAllFilters);
