@@ -338,6 +338,22 @@
     position: absolute; top: -7px; right: -7px; min-width: 16px; height: 16px; line-height: 16px;
     background: #d33; color: #fff; font-size: 10px; font-weight: bold; text-align: center; border-radius: 8px; padding: 0 3px;
   }
+  /* 調整1(v2.6): 定位點藍針身分固定 + 右上角疊加貨物徽章(📦 + 紅色筆數圈)。針尖(底部中心)不被遮擋。 */
+  .cargo-badge-pin { background: transparent; border: none; } /* 蓋掉 leaflet-div-icon 預設白底方框 */
+  .pin-cargo-wrap { position: relative; width: 25px; height: 41px; }
+  .pin-cargo-wrap .pin-img { width: 25px; height: 41px; display: block; }
+  .pin-cargo-badge {
+    position: absolute; top: -5px; right: -9px;
+    width: 20px; height: 20px; border-radius: 50%;
+    background: #1a73e8; border: 2px solid #fff; box-shadow: 0 0 4px rgba(26,115,232,0.9);
+    display: flex; align-items: center; justify-content: center; font-size: 11px; line-height: 1;
+  }
+  .pin-cargo-badge::after { content: "📦"; }
+  .pin-cargo-badge .cargo-count {
+    position: absolute; top: -8px; right: -8px; min-width: 15px; height: 15px; line-height: 15px;
+    background: #d33; color: #fff; font-size: 9px; font-weight: bold; text-align: center;
+    border: 1px solid #fff; border-radius: 8px; padding: 0 3px;
+  }
   /* popup / AR 詳情內的貨物區塊 */
   .cargo-section { margin-top: 10px; border-top: 1px solid #345; padding-top: 8px; }
   .cargo-section h4 { margin: 0 0 6px; font-size: 14px; color: #ffcf80; }
@@ -688,6 +704,16 @@
   </div>
 </div>
 
+<!-- 調整2(v2.6): app 內建自訂提示彈窗(取代 window.alert，單「確定」鈕) -->
+<div id="alertModalOverlay" class="modal-overlay">
+  <div class="modal-box">
+    <div id="alertModalText" class="modal-coords" style="white-space:pre-wrap; font-size:15px; color:#fff; margin-bottom:14px;"></div>
+    <div class="modal-actions">
+      <button id="alertModalOk">確定</button>
+    </div>
+  </div>
+</div>
+
 <div id="appVersion"></div>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
@@ -697,7 +723,7 @@
   "use strict";
 
   var STORAGE_KEY = "gpsArPoints_v1";
-  var APP_VERSION = "2.5.0"; // 每次改版記得同步更新
+  var APP_VERSION = "2.6.0"; // 每次改版記得同步更新
   var RECENT_COLORS_KEY = "gpsArRecentColors_v1"; // 調整4: 最近使用顏色清單
   var RECENT_COLORS_MAX = 10;
   var DEFAULT_CARGO_COLOR = "#ff3b30";
@@ -752,11 +778,11 @@
         delete pointBeingAdded.photo;
         try {
           savePoints(points);
-          window.alert("儲存空間已滿，此筆將不含照片儲存。");
+          appAlert("儲存空間已滿，此筆將不含照片儲存。");
           return true;
         } catch (e2) { /* 連無照片版本都存不下，落到下方 */ }
       }
-      window.alert("儲存空間已滿，無法儲存這筆登記，請先刪除部分資料再試。");
+      appAlert("儲存空間已滿，無法儲存這筆登記，請先刪除部分資料再試。");
       return false;
     }
   }
@@ -930,6 +956,25 @@
   confirmModalOk.addEventListener("click", function () { resolveAppConfirm(true); });
   confirmModalCancel.addEventListener("click", function () { resolveAppConfirm(false); });
   confirmModalOverlay.addEventListener("click", function (e) { if (e.target === confirmModalOverlay) resolveAppConfirm(false); });
+
+  // 調整2(v2.6): app 自訂提示彈窗(取代系統 window.alert)。用法: appAlert(訊息[, onClose])。單「確定」鈕，點背景=關閉。
+  var alertModalOverlay = document.getElementById("alertModalOverlay");
+  var alertModalText = document.getElementById("alertModalText");
+  var alertModalOk = document.getElementById("alertModalOk");
+  var alertOnClose = null;
+  function appAlert(message, onClose) {
+    alertModalText.textContent = message;
+    alertOnClose = onClose || null;
+    alertModalOverlay.classList.add("active");
+  }
+  function resolveAppAlert() {
+    var f = alertOnClose;
+    alertModalOverlay.classList.remove("active");
+    alertOnClose = null;
+    if (f) f();
+  }
+  alertModalOk.addEventListener("click", resolveAppAlert);
+  alertModalOverlay.addEventListener("click", function (e) { if (e.target === alertModalOverlay) resolveAppAlert(); });
 
   // ===================== Tabs =====================
   var tabBtns = document.querySelectorAll(".tab-btn");
@@ -1248,15 +1293,12 @@
     }
 
     var lastRaw = samplingState.rawSamples[samplingState.rawSamples.length - 1];
-    var useAnyway = window.confirm(
+    appConfirm(
       "目前定位品質太差（可能在室內或訊號不佳），最後一筆讀數精度 ±" + lastRaw.accuracy.toFixed(1) +
-      "m，是否仍要使用這筆讀數登記？"
+      "m，是否仍要使用這筆讀數登記？",
+      function () { completeBackgroundSampling([lastRaw]); },
+      function () { abortPendingRegistration("已取消，未儲存。"); }
     );
-    if (!useAnyway) {
-      abortPendingRegistration("已取消，未儲存。");
-      return;
-    }
-    completeBackgroundSampling([lastRaw]);
   }
 
   function onSamplePosition(pos) {
@@ -1326,7 +1368,7 @@
     }).catch(function (err) {
       labelModalPhotoBtn.disabled = false;
       labelModalPhotoBtn.textContent = "📷 拍照（選填）";
-      window.alert("照片處理失敗：" + err.message);
+      appAlert("照片處理失敗：" + err.message);
     });
     labelModalPhotoInput.value = ""; // 允許重拍同一張檔案
   });
@@ -1657,11 +1699,12 @@
     if (id == null) return;
     var p = loadPoints().filter(function (x) { return x.id === id; })[0];
     if (!p) return;
-    if (!window.confirm("確定刪除『" + p.label + "』這個地標？此動作無法復原")) return;
-    savePoints(loadPoints().filter(function (x) { return x.id !== id; }));
-    closeArDetail();
-    closeGroupList(); // 若是從清單點進來的，一併關閉
-    // AR 標籤下一幀由 cleanupMarkerEls 自動移除；地圖/登記列表下次切換頁籤重讀 localStorage 反映
+    appConfirm("確定刪除『" + p.label + "』這個地標？此動作無法復原", function () {
+      savePoints(loadPoints().filter(function (x) { return x.id !== id; }));
+      closeArDetail();
+      closeGroupList(); // 若是從清單點進來的，一併關閉
+      // AR 標籤下一幀由 cleanupMarkerEls 自動移除；地圖/登記列表下次切換頁籤重讀 localStorage 反映
+    });
   });
 
   // 修正2: 收到新的原始羅盤讀數時，先做圓周平滑再寫入 currentHeading。
@@ -2079,17 +2122,24 @@
   var mapAutoFetchedLocationOnce = false;
   var clusterModeActive = false; // 調整3(v2): 聚合顯示開關(僅當次瀏覽有效，不存 localStorage)
 
-  // 新增B(v3): 有在場貨物的 marker —— 藍底 + 📦 徽章 + 數量
-  function cargoIconWithCount(n) {
+  // 調整1(v2.6): 定位點藍針身分「固定」，有在場貨物時在藍針右上角「疊加」貨物徽章(📦 + 筆數)，
+  // 不再整個換成貨物箱，避免切換不同點時誤以為圖示互相調換。針尖(iconAnchor 底部中心)準確指向座標。
+  var LEAFLET_MARKER_ICON_URL = "https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png"; // 與 <head> leaflet CSS 同版本
+  function cargoBadgePinIcon(n) {
     return L.divIcon({
-      className: "cargo-marker",
-      html: "<div class='cargo-marker-inner'><span class='cargo-count'>" + n + "</span></div>",
-      iconSize: [26, 26], iconAnchor: [13, 13]
+      className: "cargo-badge-pin",
+      html: "<div class='pin-cargo-wrap'>" +
+              "<img class='pin-img' src='" + LEAFLET_MARKER_ICON_URL + "' alt='' draggable='false'>" +
+              "<span class='pin-cargo-badge'><span class='cargo-count'>" + n + "</span></span>" +
+            "</div>",
+      iconSize: [25, 41], iconAnchor: [12, 41], popupAnchor: [1, -34]
     });
   }
-  // 依點的狀態回傳預設(未選取)圖示：有在場貨物→貨物徽章，否則一般藍色 marker
+  // 依點的狀態回傳預設(未選取)圖示：有(符合篩選的)在場貨物→藍針+貨物徽章，否則純藍針。
+  // 用 visibleCargoCount(套用篩選)：篩選後為 0 就顯示純藍針、不掛徽章(避免出現「0」徽章)。
   function defaultIconFor(points, p) {
-    if (hasActiveCargo(p)) return cargoIconWithCount(visibleCargoCount(p));
+    var n = visibleCargoCount(p);
+    if (n > 0) return cargoBadgePinIcon(n);
     return new L.Icon.Default();
   }
 
@@ -2377,18 +2427,19 @@
       var undoBtn = document.createElement("button");
       undoBtn.textContent = "↩️ 還原上一步";
       undoBtn.addEventListener("click", function () {
-        if (!window.confirm("確定還原「" + p.label + "」上一步修正？")) return;
-        var points = loadPoints();
-        points.forEach(function (x) {
-          if (x.id !== p.id || !x.editHistory || x.editHistory.length === 0) return;
-          var h = x.editHistory.pop();
-          x.lat = h.fromLat;
-          x.lng = h.fromLng;
+        appConfirm("確定還原「" + p.label + "」上一步修正？", function () {
+          var points = loadPoints();
+          points.forEach(function (x) {
+            if (x.id !== p.id || !x.editHistory || x.editHistory.length === 0) return;
+            var h = x.editHistory.pop();
+            x.lat = h.fromLat;
+            x.lng = h.fromLng;
+          });
+          savePoints(points);
+          leafletMap.closePopup();
+          renderMapMarkers();
+          if (offsetPanelPointId === p.id) updateOffsetPanelInfo(); // 微調面板同步狀態
         });
-        savePoints(points);
-        leafletMap.closePopup();
-        renderMapMarkers();
-        if (offsetPanelPointId === p.id) updateOffsetPanelInfo(); // 微調面板同步狀態
       });
       actions.appendChild(undoBtn);
 
@@ -2396,18 +2447,19 @@
         var restoreBtn = document.createElement("button");
         restoreBtn.textContent = "📡 還原 GPS 原始位置";
         restoreBtn.addEventListener("click", function () {
-          if (!window.confirm("確定將「" + p.label + "」還原到 GPS 原始位置？此動作會清空編輯歷史。")) return;
-          var points = loadPoints();
-          points.forEach(function (x) {
-            if (x.id !== p.id) return;
-            x.lat = x.originalLat;
-            x.lng = x.originalLng;
-            x.editHistory = [];
+          appConfirm("確定將「" + p.label + "」還原到 GPS 原始位置？此動作會清空編輯歷史。", function () {
+            var points = loadPoints();
+            points.forEach(function (x) {
+              if (x.id !== p.id) return;
+              x.lat = x.originalLat;
+              x.lng = x.originalLng;
+              x.editHistory = [];
+            });
+            savePoints(points);
+            leafletMap.closePopup();
+            renderMapMarkers();
+            if (offsetPanelPointId === p.id) updateOffsetPanelInfo();
           });
-          savePoints(points);
-          leafletMap.closePopup();
-          renderMapMarkers();
-          if (offsetPanelPointId === p.id) updateOffsetPanelInfo();
         });
         actions.appendChild(restoreBtn);
       }
@@ -2501,14 +2553,15 @@
     var pv = byId(loadPoints(), pointId);
     var rv = pv && pv.cargoRecords ? pv.cargoRecords.filter(function (r) { return r.id === recId; })[0] : null;
     if (!rv) return;
-    if (!window.confirm("確定將「" + rv.name + "」標記為已出貨？\n（記錄會永久保留，僅狀態變更）")) return;
-    var points = loadPoints();
-    var p = byId(points, pointId);
-    (p.cargoRecords || []).forEach(function (r) {
-      if (r.id === recId) { r.status = "shipped"; r.shippedAt = new Date().toISOString(); }
+    appConfirm("確定將「" + rv.name + "」標記為已出貨？\n（記錄會永久保留，僅狀態變更）", function () {
+      var points = loadPoints();
+      var p = byId(points, pointId);
+      (p.cargoRecords || []).forEach(function (r) {
+        if (r.id === recId) { r.status = "shipped"; r.shippedAt = new Date().toISOString(); }
+      });
+      savePoints(points);
+      if (onChange) onChange();
     });
-    savePoints(points);
-    if (onChange) onChange();
   }
 
   // 貨物照片可能塞爆空間 → 比照登記照片的 quota 保護(失敗則去照片重存)
@@ -2517,10 +2570,10 @@
     catch (e) {
       if (isQuotaError(e) && cargoRec && cargoRec.photo) {
         delete cargoRec.photo;
-        try { savePoints(points); window.alert("儲存空間已滿，此貨物記錄將不含照片儲存。"); return true; }
+        try { savePoints(points); appAlert("儲存空間已滿，此貨物記錄將不含照片儲存。"); return true; }
         catch (e2) { /* fall through */ }
       }
-      window.alert("儲存空間已滿，無法儲存這筆貨物記錄，請先刪除部分資料再試。");
+      appAlert("儲存空間已滿，無法儲存這筆貨物記錄，請先刪除部分資料再試。");
       return false;
     }
   }
@@ -2570,11 +2623,12 @@
     var st = mapMoveState;
     if (!st.active || toPointId === st.fromPointId) return;
     var to = byId(loadPoints(), toPointId);
-    if (!window.confirm("把『" + st.rec.name + "』移動到『" + (to ? to.label : "?") + "』？")) return;
-    if (moveCargoRecord(st.fromPointId, st.rec.id, toPointId)) {
-      cancelMapMove();
-      renderMapMarkers();
-    }
+    appConfirm("把『" + st.rec.name + "』移動到『" + (to ? to.label : "?") + "』？", function () {
+      if (moveCargoRecord(st.fromPointId, st.rec.id, toPointId)) {
+        cancelMapMove();
+        renderMapMarkers();
+      }
+    });
   }
   mapMoveCancel.addEventListener("click", cancelMapMove);
   mapMoveUseList.addEventListener("click", function () {
@@ -2727,7 +2781,7 @@
     }).catch(function (err) {
       cargoPhotoBtn.disabled = false;
       cargoPhotoBtn.textContent = "📷 拍照（選填）";
-      window.alert("照片處理失敗：" + err.message);
+      appAlert("照片處理失敗：" + err.message);
     });
     cargoPhotoInput.value = "";
   });
