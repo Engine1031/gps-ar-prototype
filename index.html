@@ -98,6 +98,19 @@
     background: #a00; color: #fff; border: none; border-radius: 8px; cursor: pointer;
   }
 
+  /* 修正4(v2.4): 貨物記錄表單欄位多、超過畫面高度 —— 讓彈窗內容可垂直捲動，
+     並把上緣讓開頂部固定頁籤列(56px，z-index 高於彈窗)，避免最上面的名稱欄被切掉。
+     「取消/確認」按鈕列 sticky 固定在底部，不用一直往下捲才找得到。新增/編輯共用同一彈窗，兩者皆適用。 */
+  #cargoModalOverlay { align-items: flex-start; padding-top: 62px; }
+  #cargoModalOverlay .modal-box {
+    max-height: calc(100vh - 82px);
+    overflow-y: auto; -webkit-overflow-scrolling: touch;
+  }
+  #cargoModalOverlay .modal-actions {
+    position: sticky; bottom: -20px; /* 抵銷 modal-box 底部 padding，使按鈕列貼齊底緣 */
+    background: #181818; padding: 12px 0 20px; margin-bottom: 0; z-index: 1;
+  }
+
   /* ---------- View / AR mode ---------- */
   #viewScreen { background: #000; }
   #camera {
@@ -654,7 +667,7 @@
   "use strict";
 
   var STORAGE_KEY = "gpsArPoints_v1";
-  var APP_VERSION = "2.3.0"; // 每次改版記得同步更新
+  var APP_VERSION = "2.4.0"; // 每次改版記得同步更新
   var RECENT_COLORS_KEY = "gpsArRecentColors_v1"; // 調整4: 最近使用顏色清單
   var RECENT_COLORS_MAX = 10;
   var DEFAULT_CARGO_COLOR = "#ff3b30";
@@ -1377,7 +1390,8 @@
     orientationHandlersAttached: false,
     openDetailPointId: null,   // 詳情卡片目前對應的登記點 id(null 表示未開)
     openGroupMemberIds: null,  // 調整2: 群組清單彈窗目前列出的成員 id 陣列(null 表示未開)
-    nudgeFocusPointId: null     // 調整5: 位置微調專注模式對應的點 id(null 表示未開)
+    nudgeFocusPointId: null,    // 調整5: 位置微調專注模式對應的點 id(null 表示未開)
+    frozenPosition: null        // 修正2(v2.4): AR 微調期間凍結的使用者基準位置 {lat,lng,accuracy}(null=用即時位置)
   };
 
   // 調整1: 依距離回傳分級樣式 class
@@ -1418,6 +1432,11 @@
   }
   function openArNudgeFocus(pointId) {
     viewState.nudgeFocusPointId = pointId;
+    // 修正2(v2.4): 進入微調當下把平滑後的使用者位置凍結成固定基準點，微調期間所有標籤都用它
+    // 計算方位角/距離，不再受背景 watchPosition 跳動干擾(朝向 currentHeading 仍即時更新)。
+    viewState.frozenPosition = viewState.currentPosition
+      ? { lat: viewState.currentPosition.lat, lng: viewState.currentPosition.lng, accuracy: viewState.currentPosition.accuracy }
+      : null;
     updateArNudgeFocusInfo();
     renderNudgeControls(arNudgeFocusPanel, pointId, updateArNudgeFocusInfo);
     arNudgeFocus.classList.add("active");
@@ -1425,6 +1444,7 @@
   function closeArNudgeFocus() {
     arNudgeFocus.classList.remove("active");
     viewState.nudgeFocusPointId = null;
+    viewState.frozenPosition = null; // 修正2(v2.4): 離開微調恢復使用即時 watchPosition 位置
   }
   arDetailNudge.addEventListener("click", function () {
     var id = viewState.openDetailPointId;
@@ -1708,11 +1728,15 @@
 
     orientationWarning.style.display = viewState.headingIsFallback ? "block" : "none";
 
+    // 修正2(v2.4): 微調期間用凍結的基準位置，否則用即時平滑位置。整個 AR 計算都以 basePos 為準。
+    var basePos = viewState.frozenPosition || viewState.currentPosition;
+
     var diagLines = [];
     diagLines.push("=== 診斷資訊 ===");
-    if (viewState.currentPosition) {
-      diagLines.push("GPS: " + viewState.currentPosition.lat.toFixed(6) + ", " + viewState.currentPosition.lng.toFixed(6) +
-        "  accuracy: ±" + viewState.currentPosition.accuracy.toFixed(1) + "m");
+    if (basePos) {
+      diagLines.push("GPS: " + basePos.lat.toFixed(6) + ", " + basePos.lng.toFixed(6) +
+        "  accuracy: ±" + basePos.accuracy.toFixed(1) + "m" +
+        (viewState.frozenPosition ? "  (微調凍結)" : ""));
     } else {
       diagLines.push("GPS: 尚未取得定位");
     }
@@ -1731,16 +1755,16 @@
       ensureMarkerEl(p); // 確保元素存在(供分群時取用/隱藏)
       var regAccuracyText = "登記時精度 ±" + (p.accuracy != null ? p.accuracy.toFixed(1) : "?") + "m";
 
-      if (!viewState.currentPosition || viewState.currentHeading == null) {
+      if (!basePos || viewState.currentHeading == null) {
         diagLines.push(p.label + ": 等待 GPS/方位資料... (" + regAccuracyText + ")");
         return;
       }
 
       var dist = haversineDistance(
-        viewState.currentPosition.lat, viewState.currentPosition.lng, p.lat, p.lng
+        basePos.lat, basePos.lng, p.lat, p.lng
       );
       var brg = bearingTo(
-        viewState.currentPosition.lat, viewState.currentPosition.lng, p.lat, p.lng
+        basePos.lat, basePos.lng, p.lat, p.lng
       );
       var rel = normalizeRelative(brg, viewState.currentHeading);
       var inFov = Math.abs(rel) <= halfFov;
@@ -1826,7 +1850,7 @@
         if (!item) return;
         var span = item.querySelector(".group-list-dist");
         var m = entries.filter(function (e) { return e.p.id === id; })[0];
-        if (span) span.textContent = (m && viewState.currentPosition) ? m.dist.toFixed(1) + " m" : "無法計算";
+        if (span) span.textContent = (m && basePos) ? m.dist.toFixed(1) + " m" : "無法計算";
       });
     }
 
@@ -1835,7 +1859,7 @@
       var distEl = document.getElementById("arDetailDist");
       if (distEl) {
         var match = entries.filter(function (e) { return e.p.id === viewState.openDetailPointId; })[0];
-        distEl.textContent = (match && viewState.currentPosition) ? match.dist.toFixed(1) + " m" : "無法計算";
+        distEl.textContent = (match && basePos) ? match.dist.toFixed(1) + " m" : "無法計算";
       }
     }
 
@@ -1844,8 +1868,8 @@
       var fDistEl = document.getElementById("arNudgeFocusDist");
       if (fDistEl) {
         var fp = byId(points, viewState.nudgeFocusPointId);
-        if (fp && viewState.currentPosition) {
-          fDistEl.textContent = haversineDistance(viewState.currentPosition.lat, viewState.currentPosition.lng, fp.lat, fp.lng).toFixed(1) + " m";
+        if (fp && basePos) {
+          fDistEl.textContent = haversineDistance(basePos.lat, basePos.lng, fp.lat, fp.lng).toFixed(1) + " m";
         } else fDistEl.textContent = "無法計算";
       }
     }
@@ -2171,6 +2195,28 @@
     var target = marker.getLatLng();
     var points = loadPoints();
     var selected = points.filter(function (p) { return editSelectedIds.indexOf(p.id) !== -1; });
+
+    // 修正3(v2.4): 單點自由拖曳微調不跳確認框 —— 直接即時寫入座標與 editHistory，
+    // 以「事後可還原」(還原上一步/還原 GPS 原始位置)取代「每次都確認」。維持選取讓使用者能連續拖曳。
+    if (selected.length === 1) {
+      var sp = selected[0];
+      if (sp.originalLat == null || sp.originalLng == null) {
+        sp.originalLat = sp.lat;
+        sp.originalLng = sp.lng;
+      }
+      if (!sp.editHistory) sp.editHistory = [];
+      sp.editHistory.push({ editedAt: new Date().toISOString(), fromLat: sp.lat, fromLng: sp.lng, toLat: target.lat, toLng: target.lng });
+      sp.lat = target.lat;
+      sp.lng = target.lng;
+      savePoints(points);
+      renderMapMarkers(); // 保留 editSelectedIds，重繪後該 marker 仍為選取狀態、可繼續拖曳
+      if (offsetPanelPointId === sp.id) updateOffsetPanelInfo();
+      measureResultBar.textContent = "編輯模式：已更新「" + sp.label + "」位置（可用 popup 還原上一步）";
+      measureResultBar.style.display = "block";
+      return;
+    }
+
+    // 批次拖曳多個點(一次移動多筆到同一位置)：維持彙總確認
     var labelList = selected.map(function (p) { return "・" + p.label; }).join("\n");
     var ok = window.confirm("確定將 " + selected.length + " 筆記錄移動到此位置？\n\n" + labelList);
     if (!ok) {
@@ -2771,6 +2817,9 @@
   };
   var PAD_LAYOUT = ["NW", "N", "NE", "W", "center", "E", "SW", "S", "SE"];
   var PAD_ARROWS = { NW: "↖", N: "↑", NE: "↗", W: "←", E: "→", SW: "↙", S: "↓", SE: "↘" };
+  // 修正1(v2.4): AR 微調第一人稱方向 —— 每個方向鍵對應「相對使用者當下朝向」的角度
+  // (前=0、右=90、後=180、左=270，四個對角為 45/135/225/315)。實際移動方位角 = 此相對角 + currentHeading。
+  var OFFSET_RELATIVE_ANGLE = { N: 0, NE: 45, E: 90, SE: 135, S: 180, SW: 225, W: 270, NW: 315 };
 
   function buildOffsetStepRow() {
     offsetStepRow.innerHTML = "";
@@ -2852,6 +2901,22 @@
     // AR 由 updateAR 迴圈自動反映新位置/距離
   }
 
+  // 修正1(v2.4): AR 微調專用 —— 以使用者手機當下羅盤朝向(currentHeading)為基準的第一人稱位移。
+  // 按鍵的相對角(前/右/後/左/對角)加上 currentHeading 得到實際移動方位角，再換算成東/北位移。
+  // 地圖編輯模式的 8 方向鍵不走這裡(維持固定地理方位，見 buildOffsetPad)。
+  function nudgePointFirstPerson(pointId, dirKey, stepM) {
+    if (viewState.currentHeading == null) {
+      // 尚無方位資料時退回固定地理方位，至少不會完全無法微調
+      var v = OFFSET_DIRECTIONS[dirKey];
+      nudgePoint(pointId, v[0] * stepM, v[1] * stepM);
+      return;
+    }
+    var bearing = (OFFSET_RELATIVE_ANGLE[dirKey] + viewState.currentHeading) % 360;
+    var dNorth = stepM * Math.cos(toRad(bearing)); // 方位角 0=正北、90=正東
+    var dEast = stepM * Math.sin(toRad(bearing));
+    nudgePoint(pointId, dEast, dNorth);
+  }
+
   // 調整5: 通用微調控制(供 AR 詳情卡片重用地圖同一套 nudgePoint 邏輯)
   function renderNudgeControls(container, pointId, onAfter) {
     container.innerHTML = "";
@@ -2876,8 +2941,8 @@
       else {
         cell.textContent = PAD_ARROWS[dir];
         var fire = function () {
-          var v = OFFSET_DIRECTIONS[dir];
-          nudgePoint(pointId, v[0] * offsetStepM, v[1] * offsetStepM);
+          // 修正1(v2.4): AR 微調改用第一人稱方向(以 currentHeading 為基準)
+          nudgePointFirstPerson(pointId, dir, offsetStepM);
           if (onAfter) onAfter();
         };
         // 修正2: touchend preventDefault 避免雙擊縮放，快速連點每次都觸發
