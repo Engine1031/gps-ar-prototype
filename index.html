@@ -98,17 +98,24 @@
     background: #a00; color: #fff; border: none; border-radius: 8px; cursor: pointer;
   }
 
-  /* 修正4(v2.4): 貨物記錄表單欄位多、超過畫面高度 —— 讓彈窗內容可垂直捲動，
-     並把上緣讓開頂部固定頁籤列(56px，z-index 高於彈窗)，避免最上面的名稱欄被切掉。
-     「取消/確認」按鈕列 sticky 固定在底部，不用一直往下捲才找得到。新增/編輯共用同一彈窗，兩者皆適用。 */
-  #cargoModalOverlay { align-items: flex-start; padding-top: 62px; }
+  /* 修正4(v2.4)+調整4(v2.5): 貨物記錄表單欄位多、超過畫面高度 —— 讓彈窗內容可垂直捲動，
+     上緣讓開頂部固定頁籤列(56px)，底部保留裝置安全區(env(safe-area-inset-bottom))避免被瀏覽器底部
+     工具列/home indicator 遮擋。「取消/儲存」按鈕列 sticky 固定在彈窗底部可見區內，永遠點得到。
+     用 dvh(動態視窗高)才能扣掉行動瀏覽器動態工具列；不支援 dvh 的舊瀏覽器退回 vh。新增/編輯共用此彈窗。 */
+  #cargoModalOverlay {
+    align-items: flex-start;
+    padding-top: 62px;
+    padding-bottom: calc(20px + env(safe-area-inset-bottom, 0px));
+  }
   #cargoModalOverlay .modal-box {
     max-height: calc(100vh - 82px);
+    max-height: calc(100dvh - 82px - env(safe-area-inset-bottom, 0px));
     overflow-y: auto; -webkit-overflow-scrolling: touch;
+    padding-bottom: 0; /* 底部間距交給 sticky footer，footer 才能貼齊 bottom:0 */
   }
   #cargoModalOverlay .modal-actions {
-    position: sticky; bottom: -20px; /* 抵銷 modal-box 底部 padding，使按鈕列貼齊底緣 */
-    background: #181818; padding: 12px 0 20px; margin-bottom: 0; z-index: 1;
+    position: sticky; bottom: 0;
+    background: #181818; margin: 0; padding: 12px 0 20px; z-index: 2;
   }
 
   /* ---------- View / AR mode ---------- */
@@ -137,6 +144,18 @@
   .marker.dist-near .marker-dist { color: #9f9; }
   .marker.dist-mid  .marker-dist { color: #fe8; }
   .marker.dist-far  .marker-dist { color: #bbb; }
+
+  /* 調整1(v2.5): 正在微調的標籤「選定中」特效 —— 黃色加粗高亮外框 + 脈動呼吸燈，一眼看出正在調哪個 */
+  .marker.marker-nudging {
+    border-color: #ff0; border-width: 3px; color: #fff;
+    background: rgba(60, 55, 0, 0.9); z-index: 40;
+    animation: markerNudgePulse 1.1s ease-in-out infinite;
+  }
+  .marker.marker-nudging .marker-dist { color: #ffe58a; }
+  @keyframes markerNudgePulse {
+    0%, 100% { box-shadow: 0 0 0 3px rgba(255, 221, 0, 0.35); transform: translate(-50%, -50%) scale(1); }
+    50%      { box-shadow: 0 0 16px 7px rgba(255, 221, 0, 0.85); transform: translate(-50%, -50%) scale(1.14); }
+  }
 
   /* 群組標籤(調整2) —— 藍色底色區分，尺寸比照近距離 */
   .marker.marker-group { border-color: #4af; background: rgba(0, 25, 55, 0.88); color: #fff; font-size: 14px; }
@@ -658,6 +677,17 @@
   </div>
 </div>
 
+<!-- 調整3(v2.5): app 內建自訂確認彈窗(取代 iOS 系統 window.confirm，無「禁止顯示對話方塊」選項) -->
+<div id="confirmModalOverlay" class="modal-overlay">
+  <div class="modal-box">
+    <div id="confirmModalText" class="modal-coords" style="white-space:pre-wrap; font-size:15px; color:#fff; margin-bottom:14px;"></div>
+    <div class="modal-actions">
+      <button id="confirmModalCancel">取消</button>
+      <button id="confirmModalOk">確認</button>
+    </div>
+  </div>
+</div>
+
 <div id="appVersion"></div>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
@@ -667,7 +697,7 @@
   "use strict";
 
   var STORAGE_KEY = "gpsArPoints_v1";
-  var APP_VERSION = "2.4.0"; // 每次改版記得同步更新
+  var APP_VERSION = "2.5.0"; // 每次改版記得同步更新
   var RECENT_COLORS_KEY = "gpsArRecentColors_v1"; // 調整4: 最近使用顏色清單
   var RECENT_COLORS_MAX = 10;
   var DEFAULT_CARGO_COLOR = "#ff3b30";
@@ -877,6 +907,29 @@
     savePoints(points);
     return true;
   }
+
+  // ===================== 調整3(v2.5): app 自訂確認彈窗(取代系統 window.confirm) =====================
+  // 用法: appConfirm(訊息, onOk[, onCancel])。只有「確認」「取消」兩顆按鈕，點背景視同取消。
+  var confirmModalOverlay = document.getElementById("confirmModalOverlay");
+  var confirmModalText = document.getElementById("confirmModalText");
+  var confirmModalOk = document.getElementById("confirmModalOk");
+  var confirmModalCancel = document.getElementById("confirmModalCancel");
+  var confirmOnOk = null, confirmOnCancel = null;
+  function appConfirm(message, onOk, onCancel) {
+    confirmModalText.textContent = message;
+    confirmOnOk = onOk || null;
+    confirmOnCancel = onCancel || null;
+    confirmModalOverlay.classList.add("active");
+  }
+  function resolveAppConfirm(ok) {
+    var f = ok ? confirmOnOk : confirmOnCancel;
+    confirmModalOverlay.classList.remove("active");
+    confirmOnOk = null; confirmOnCancel = null;
+    if (f) f();
+  }
+  confirmModalOk.addEventListener("click", function () { resolveAppConfirm(true); });
+  confirmModalCancel.addEventListener("click", function () { resolveAppConfirm(false); });
+  confirmModalOverlay.addEventListener("click", function (e) { if (e.target === confirmModalOverlay) resolveAppConfirm(false); });
 
   // ===================== Tabs =====================
   var tabBtns = document.querySelectorAll(".tab-btn");
@@ -1391,7 +1444,8 @@
     openDetailPointId: null,   // 詳情卡片目前對應的登記點 id(null 表示未開)
     openGroupMemberIds: null,  // 調整2: 群組清單彈窗目前列出的成員 id 陣列(null 表示未開)
     nudgeFocusPointId: null,    // 調整5: 位置微調專注模式對應的點 id(null 表示未開)
-    frozenPosition: null        // 修正2(v2.4): AR 微調期間凍結的使用者基準位置 {lat,lng,accuracy}(null=用即時位置)
+    frozenPosition: null,       // 修正2(v2.4): AR 微調期間凍結的使用者基準位置 {lat,lng,accuracy}(null=用即時位置)
+    nudgeBuffer: null           // 調整1(v2.5): AR 微調編輯緩衝 {pointId, origLat, origLng, lat, lng}(null=未在微調)
   };
 
   // 調整1: 依距離回傳分級樣式 class
@@ -1406,6 +1460,8 @@
   function openArDetail(pointId) {
     var p = loadPoints().filter(function (x) { return x.id === pointId; })[0];
     if (!p) return;
+    // 調整1(v2.5): 若正在微調另一個點就先捨棄其暫存(切換到別的點 → 未完成的調整不保留)
+    if (viewState.nudgeFocusPointId != null) closeArNudgeFocus();
     viewState.openDetailPointId = pointId;
     arDetailTitle.textContent = p.label; // 調整5: 標題獨立於 body(操作列在其下)
     var rows = [];
@@ -1422,16 +1478,23 @@
   }
 
   // ---------- 調整5: AR 位置微調專注模式(卡片退場，底部精簡面板) ----------
+  // 調整1(v2.5): 微調改為「編輯緩衝」—— 方向鍵只改 viewState.nudgeBuffer 的暫存座標並即時反映在畫面，
+  // 完全不寫 localStorage；只有按「✓ 完成」(commitArNudge)才正式寫入 + 記一筆 editHistory(from=進入微調當下, to=完成當下)。
+  // 任何其他方式離開(切點/切頁籤/離開檢視/關面板)都走 closeArNudgeFocus → 捨棄暫存，座標退回原始(因從未寫入)。
   function updateArNudgeFocusInfo() {
-    var id = viewState.nudgeFocusPointId;
-    var p = byId(loadPoints(), id);
-    if (!p) { closeArNudgeFocus(); return; }
+    var buf = viewState.nudgeBuffer;
+    var p = byId(loadPoints(), viewState.nudgeFocusPointId);
+    if (!p || !buf) { closeArNudgeFocus(); return; }
     arNudgeFocusInfo.innerHTML = "微調「" + escapeHtml(p.label) + "」　" +
-      p.lat.toFixed(6) + ", " + p.lng.toFixed(6) +
+      buf.lat.toFixed(6) + ", " + buf.lng.toFixed(6) +
       "　距離 <b id='arNudgeFocusDist'>計算中...</b>";
   }
   function openArNudgeFocus(pointId) {
+    var p = byId(loadPoints(), pointId);
+    if (!p) return;
     viewState.nudgeFocusPointId = pointId;
+    // 調整1(v2.5): 記住進入微調當下的原始座標，並以它初始化暫存座標
+    viewState.nudgeBuffer = { pointId: pointId, origLat: p.lat, origLng: p.lng, lat: p.lat, lng: p.lng };
     // 修正2(v2.4): 進入微調當下把平滑後的使用者位置凍結成固定基準點，微調期間所有標籤都用它
     // 計算方位角/距離，不再受背景 watchPosition 跳動干擾(朝向 currentHeading 仍即時更新)。
     viewState.frozenPosition = viewState.currentPosition
@@ -1441,10 +1504,47 @@
     renderNudgeControls(arNudgeFocusPanel, pointId, updateArNudgeFocusInfo);
     arNudgeFocus.classList.add("active");
   }
+  // 離開微調 = 捨棄暫存(不寫入 → 座標自動維持原始值)
   function closeArNudgeFocus() {
     arNudgeFocus.classList.remove("active");
     viewState.nudgeFocusPointId = null;
+    viewState.nudgeBuffer = null;    // 調整1(v2.5): 丟棄未完成的暫存調整
     viewState.frozenPosition = null; // 修正2(v2.4): 離開微調恢復使用即時 watchPosition 位置
+  }
+  // 按「✓ 完成」才正式落地
+  function commitArNudge() {
+    var buf = viewState.nudgeBuffer;
+    if (buf && (buf.lat !== buf.origLat || buf.lng !== buf.origLng)) {
+      var points = loadPoints();
+      var p = byId(points, buf.pointId);
+      if (p) {
+        if (p.originalLat == null || p.originalLng == null) { p.originalLat = p.lat; p.originalLng = p.lng; }
+        if (!p.editHistory) p.editHistory = [];
+        p.editHistory.push({ editedAt: new Date().toISOString(), fromLat: buf.origLat, fromLng: buf.origLng, toLat: buf.lat, toLng: buf.lng });
+        p.lat = buf.lat;
+        p.lng = buf.lng;
+        savePoints(points);
+        if (mapMarkersLayer) renderMapMarkers(); // 地圖已初始化才同步
+      }
+    }
+    closeArNudgeFocus();
+  }
+  // 調整1(v2.5): 以使用者當下羅盤朝向為基準，把一次方向鍵位移套到暫存座標(不寫 localStorage)
+  function nudgeBufferApply(dirKey, stepM) {
+    var buf = viewState.nudgeBuffer;
+    if (!buf) return;
+    var dEast, dNorth;
+    if (viewState.currentHeading == null) {
+      // 尚無方位資料時退回固定地理方位
+      var v = OFFSET_DIRECTIONS[dirKey];
+      dEast = v[0] * stepM; dNorth = v[1] * stepM;
+    } else {
+      var bearing = (OFFSET_RELATIVE_ANGLE[dirKey] + viewState.currentHeading) % 360;
+      dNorth = stepM * Math.cos(toRad(bearing)); // 方位角 0=正北、90=正東
+      dEast = stepM * Math.sin(toRad(bearing));
+    }
+    buf.lat += dNorth / 111320;
+    buf.lng += dEast / (111320 * Math.cos(toRad(buf.lat)));
   }
   arDetailNudge.addEventListener("click", function () {
     var id = viewState.openDetailPointId;
@@ -1452,7 +1552,7 @@
     closeArDetail();        // 卡片退場，露出完整相機畫面
     openArNudgeFocus(id);   // 底部浮出精簡面板
   });
-  arNudgeFocusDone.addEventListener("click", closeArNudgeFocus);
+  arNudgeFocusDone.addEventListener("click", commitArNudge);
 
   function closeArDetail() {
     arDetailOverlay.classList.remove("active");
@@ -1760,11 +1860,16 @@
         return;
       }
 
+      // 調整1(v2.5): 正在微調的點用暫存座標(尚未寫入 localStorage)計算，讓標籤即時反映調整
+      var plat = p.lat, plng = p.lng;
+      if (viewState.nudgeBuffer && viewState.nudgeBuffer.pointId === p.id) {
+        plat = viewState.nudgeBuffer.lat; plng = viewState.nudgeBuffer.lng;
+      }
       var dist = haversineDistance(
-        basePos.lat, basePos.lng, p.lat, p.lng
+        basePos.lat, basePos.lng, plat, plng
       );
       var brg = bearingTo(
-        basePos.lat, basePos.lng, p.lat, p.lng
+        basePos.lat, basePos.lng, plat, plng
       );
       var rel = normalizeRelative(brg, viewState.currentHeading);
       var inFov = Math.abs(rel) <= halfFov;
@@ -1788,10 +1893,14 @@
     // 調整2：密度分群 —— 依相對夾角排序，相鄰夾角差 < DENSITY_GROUP_ANGLE_THRESHOLD 的點歸為同群
     var visible = entries.filter(function (e) { return e.inView; });
     visible.sort(function (a, b) { return a.rel - b.rel; });
+    var nudgeId = viewState.nudgeBuffer ? viewState.nudgeBuffer.pointId : null;
     var groups = [];
     visible.forEach(function (e) {
       var last = groups[groups.length - 1];
-      if (last && (e.rel - last[last.length - 1].rel) < DENSITY_GROUP_ANGLE_THRESHOLD) {
+      // 調整1(v2.5): 正在微調的點不併入群組，永遠自成一個單點單位(才能套用「選定中」特效)
+      var eIsNudge = nudgeId != null && e.p.id === nudgeId;
+      var lastIsNudge = last && nudgeId != null && last[last.length - 1].p.id === nudgeId;
+      if (!eIsNudge && !lastIsNudge && last && (e.rel - last[last.length - 1].rel) < DENSITY_GROUP_ANGLE_THRESHOLD) {
         last.push(e);
       } else {
         groups.push([e]);
@@ -1821,7 +1930,9 @@
       if (u.members.length === 1) {
         var e = u.members[0];
         var el = viewState.markerEls[e.p.id];
-        el.className = "marker " + distanceClass(e.dist); // 調整1: 距離分級
+        // 調整1(v2.5): 正在微調的點加「選定中」脈動高亮特效
+        var nudgeCls = (nudgeId != null && e.p.id === nudgeId) ? " marker-nudging" : "";
+        el.className = "marker " + distanceClass(e.dist) + nudgeCls; // 調整1: 距離分級
         el.style.left = u.xPercent + "%";
         el.style.top = topCss;
         el.style.display = "flex";
@@ -1867,9 +1978,9 @@
     if (viewState.nudgeFocusPointId != null) {
       var fDistEl = document.getElementById("arNudgeFocusDist");
       if (fDistEl) {
-        var fp = byId(points, viewState.nudgeFocusPointId);
-        if (fp && basePos) {
-          fDistEl.textContent = haversineDistance(basePos.lat, basePos.lng, fp.lat, fp.lng).toFixed(1) + " m";
+        var fbuf = viewState.nudgeBuffer; // 調整1(v2.5): 用暫存座標算距離
+        if (fbuf && basePos) {
+          fDistEl.textContent = haversineDistance(basePos.lat, basePos.lng, fbuf.lat, fbuf.lng).toFixed(1) + " m";
         } else fDistEl.textContent = "無法計算";
       }
     }
@@ -2216,33 +2327,34 @@
       return;
     }
 
-    // 批次拖曳多個點(一次移動多筆到同一位置)：維持彙總確認
+    // 批次拖曳多個點(一次移動多筆到同一位置)：調整3(v2.5) 改用 app 自訂確認框(取代系統 window.confirm)
     var labelList = selected.map(function (p) { return "・" + p.label; }).join("\n");
-    var ok = window.confirm("確定將 " + selected.length + " 筆記錄移動到此位置？\n\n" + labelList);
-    if (!ok) {
-      renderMapMarkers(); // 未落地，重繪即彈回原位；選取狀態保留(renderMapMarkers 會重新套用)
-      return;
-    }
-    var now = new Date().toISOString();
-    var movedIds = [];
-    points.forEach(function (p) {
-      if (editSelectedIds.indexOf(p.id) === -1) return;
-      movedIds.push(p.id);
-      // 舊資料第一次被編輯時，先把當時的 lat/lng 複製進 original 欄位再修改
-      if (p.originalLat == null || p.originalLng == null) {
-        p.originalLat = p.lat;
-        p.originalLng = p.lng;
-      }
-      if (!p.editHistory) p.editHistory = [];
-      p.editHistory.push({ editedAt: now, fromLat: p.lat, fromLng: p.lng, toLat: target.lat, toLng: target.lng });
-      p.lat = target.lat;
-      p.lng = target.lng;
+    var targetLatLng = { lat: target.lat, lng: target.lng }; // 捕捉落點座標供 callback 使用
+    var moveCount = selected.length;
+    appConfirm("確定將 " + moveCount + " 筆記錄移動到此位置？\n\n" + labelList, function () {
+      // 確認 → 落地。重讀最新資料避免競態，只移動仍在選取中的點。
+      var pts = loadPoints();
+      var now = new Date().toISOString();
+      pts.forEach(function (p) {
+        if (editSelectedIds.indexOf(p.id) === -1) return;
+        // 舊資料第一次被編輯時，先把當時的 lat/lng 複製進 original 欄位再修改
+        if (p.originalLat == null || p.originalLng == null) {
+          p.originalLat = p.lat;
+          p.originalLng = p.lng;
+        }
+        if (!p.editHistory) p.editHistory = [];
+        p.editHistory.push({ editedAt: now, fromLat: p.lat, fromLng: p.lng, toLat: targetLatLng.lat, toLng: targetLatLng.lng });
+        p.lat = targetLatLng.lat;
+        p.lng = targetLatLng.lng;
+      });
+      savePoints(pts);
+      editSelectedIds = [];
+      renderMapMarkers();
+      measureResultBar.textContent = "編輯模式：已移動 " + moveCount + " 筆記錄";
+      measureResultBar.style.display = "block";
+    }, function () {
+      renderMapMarkers(); // 取消 → 未落地，重繪即彈回原位；選取狀態保留(renderMapMarkers 會重新套用)
     });
-    savePoints(points);
-    editSelectedIds = [];
-    renderMapMarkers();
-    measureResultBar.textContent = "編輯模式：已移動 " + selected.length + " 筆記錄";
-    measureResultBar.style.display = "block";
   }
 
   // 編輯模式 popup：狀態 + 還原上一步 / 還原 GPS 原始位置(都經確認框才寫入)
@@ -2596,7 +2708,8 @@
 
   cargoName.addEventListener("input", updateCargoModalButtons);
   cargoModalCancel.addEventListener("click", closeCargoModal);
-  cargoModalOverlay.addEventListener("click", function (e) { if (e.target === cargoModalOverlay) closeCargoModal(); });
+  // 調整4B(v2.5): 貨物新增/編輯表單欄位多、誤觸成本高 —— 「不」讓點外部背景關閉，只能用取消/儲存鈕關閉。
+  // (其他較簡單彈窗如地標詳情、地標選擇清單維持點外部可關閉的行為不變。)
 
   cargoPhotoBtn.addEventListener("click", function () { cargoPhotoInput.click(); });
   cargoPhotoInput.addEventListener("change", function () {
@@ -2901,21 +3014,8 @@
     // AR 由 updateAR 迴圈自動反映新位置/距離
   }
 
-  // 修正1(v2.4): AR 微調專用 —— 以使用者手機當下羅盤朝向(currentHeading)為基準的第一人稱位移。
-  // 按鍵的相對角(前/右/後/左/對角)加上 currentHeading 得到實際移動方位角，再換算成東/北位移。
-  // 地圖編輯模式的 8 方向鍵不走這裡(維持固定地理方位，見 buildOffsetPad)。
-  function nudgePointFirstPerson(pointId, dirKey, stepM) {
-    if (viewState.currentHeading == null) {
-      // 尚無方位資料時退回固定地理方位，至少不會完全無法微調
-      var v = OFFSET_DIRECTIONS[dirKey];
-      nudgePoint(pointId, v[0] * stepM, v[1] * stepM);
-      return;
-    }
-    var bearing = (OFFSET_RELATIVE_ANGLE[dirKey] + viewState.currentHeading) % 360;
-    var dNorth = stepM * Math.cos(toRad(bearing)); // 方位角 0=正北、90=正東
-    var dEast = stepM * Math.sin(toRad(bearing));
-    nudgePoint(pointId, dEast, dNorth);
-  }
+  // 調整1(v2.5): AR 微調的第一人稱位移已移到 nudgeBufferApply(只改暫存座標、按完成才落地)，
+  // 此處不再有 nudgePointFirstPerson。地圖編輯模式的 8 方向鍵仍走 nudgePoint(即時儲存，見 buildOffsetPad)。
 
   // 調整5: 通用微調控制(供 AR 詳情卡片重用地圖同一套 nudgePoint 邏輯)
   function renderNudgeControls(container, pointId, onAfter) {
@@ -2941,8 +3041,8 @@
       else {
         cell.textContent = PAD_ARROWS[dir];
         var fire = function () {
-          // 修正1(v2.4): AR 微調改用第一人稱方向(以 currentHeading 為基準)
-          nudgePointFirstPerson(pointId, dir, offsetStepM);
+          // 修正1(v2.4)+調整1(v2.5): AR 微調以第一人稱方向改「暫存座標」，按完成才落地
+          nudgeBufferApply(dir, offsetStepM);
           if (onAfter) onAfter();
         };
         // 修正2: touchend preventDefault 避免雙擊縮放，快速連點每次都觸發
